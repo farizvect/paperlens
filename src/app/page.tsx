@@ -37,12 +37,15 @@ export default function Home() {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-[#f5f4ed]">
-      {/* Desktop sidebar — collapsible */}
-      {!sidebarCollapsed && (
-        <div className="hidden md:flex">
-          <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
-        </div>
-      )}
+      {/* Desktop sidebar — collapsible with animation */}
+      <div
+        className={cn(
+          "hidden md:flex overflow-hidden transition-all duration-300 ease-in-out shrink-0",
+          sidebarCollapsed ? "w-0 opacity-0" : "w-72 opacity-100"
+        )}
+      >
+        <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
+      </div>
 
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
