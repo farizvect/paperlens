@@ -1,5 +1,7 @@
 # PDF Research Reader
 
+![PaperLens Screenshot](public/screenshot.png)
+
 A client-side PDF research tool. Upload scientific PDFs (theses, journals, reports), ask questions, and get AI-powered answers with source citations.
 
 ## Features
