@@ -14,11 +14,32 @@ pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.vers
 interface PdfViewerProps {
   docId: string | null;
   scrollToPage?: number | null;
+  highlightText?: string | null;
   onClose?: () => void;
   className?: string;
 }
 
-export function PdfViewerInner({ docId, scrollToPage, onClose, className }: PdfViewerProps) {
+// Extract searchable phrases from chunk text (first N meaningful sentences)
+function extractPhrases(text: string, maxPhrases = 3, minLen = 20): string[] {
+  // Split on sentence boundaries, filter short fragments
+  const sentences = text
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= minLen);
+  if (sentences.length > 0) return sentences.slice(0, maxPhrases);
+  // Fallback: use first N words as a phrase
+  const words = text.replace(/\s+/g, " ").trim().split(" ");
+  const chunkSize = Math.min(15, words.length);
+  return [words.slice(0, chunkSize).join(" ")];
+}
+
+// Normalize text for comparison: collapse whitespace, lowercase
+function norm(s: string): string {
+  return s.replace(/\s+/g, " ").toLowerCase().trim();
+}
+
+export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, className }: PdfViewerProps) {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null);
   const [numPages, setNumPages] = React.useState(0);
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -35,6 +56,8 @@ export function PdfViewerInner({ docId, scrollToPage, onClose, className }: PdfV
       setNumPages(0);
       setCurrentPage(1);
       setLoading(false);
+      // Clean up highlights
+      document.querySelectorAll(".pdf-source-highlight").forEach((el) => el.remove());
       return;
     }
 
@@ -82,6 +105,77 @@ export function PdfViewerInner({ docId, scrollToPage, onClose, className }: PdfV
       }
     }
   }, [scrollToPage, numPages]);
+
+  // Highlight text in PDF text layer when highlightText changes
+  React.useEffect(() => {
+    if (!highlightText) return;
+
+    const phrases = extractPhrases(highlightText);
+    if (phrases.length === 0) return;
+
+    // Wait for text layer to render (react-pdf renders async)
+    const timer = setTimeout(() => {
+      // Remove previous highlights
+      document.querySelectorAll(".pdf-source-highlight").forEach((el) => el.remove());
+
+      // Find all text layer containers
+      const textLayers = document.querySelectorAll(".react-pdf__Page__textContent");
+
+      textLayers.forEach((layer) => {
+        const spans = Array.from(layer.querySelectorAll("span"));
+        if (spans.length === 0) return;
+
+        // Build a map: concatenated text → span references with positions
+        const allText = spans.map((s) => s.textContent || "");
+        const fullText = norm(allText.join(" "));
+
+        for (const phrase of phrases) {
+          const nPhrase = norm(phrase);
+          const idx = fullText.indexOf(nPhrase);
+          if (idx === -1) continue;
+
+          // Find which spans overlap with this phrase
+          let charPos = 0;
+          const matchStart = idx;
+          const matchEnd = idx + nPhrase.length;
+
+          for (const span of spans) {
+            const spanText = span.textContent || "";
+            const spanStart = charPos;
+            const spanEnd = charPos + norm(spanText).length;
+
+            // Check if this span overlaps with the match range
+            if (spanEnd > matchStart && spanStart < matchEnd) {
+              // Create highlight overlay matching this span's position
+              const layerRect = layer.getBoundingClientRect();
+              const spanRect = span.getBoundingClientRect();
+
+              const highlight = document.createElement("div");
+              highlight.className = "pdf-source-highlight";
+              highlight.style.cssText = `
+                position: absolute;
+                left: ${spanRect.left - layerRect.left}px;
+                top: ${spanRect.top - layerRect.top}px;
+                width: ${spanRect.width}px;
+                height: ${spanRect.height}px;
+                background: rgba(27, 54, 93, 0.18);
+                border-radius: 2px;
+                pointer-events: none;
+                z-index: 5;
+                animation: pdf-highlight-fade-in 0.3s ease-out;
+              `;
+              layer.appendChild(highlight);
+            }
+
+            charPos = spanEnd + 1; // +1 for the space between spans
+            if (charPos > matchEnd) break;
+          }
+        }
+      });
+    }, 800); // give react-pdf time to render text layer
+
+    return () => clearTimeout(timer);
+  }, [highlightText, scrollToPage, currentPage]);
 
   function onDocumentLoadSuccess({ numPages: n }: { numPages: number }) {
     setNumPages(n);

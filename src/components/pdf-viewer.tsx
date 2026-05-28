@@ -18,6 +18,7 @@ const PdfViewerInner = dynamic(() => import("@/components/pdf-viewer-inner").the
 interface PdfViewerProps {
   docId: string | null;
   scrollToPage?: number | null;
+  highlightText?: string | null;
   onClose?: () => void;
   className?: string;
 }

@@ -19,14 +19,17 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [viewerOpen, setViewerOpen] = React.useState(false);
   const [scrollToPage, setScrollToPage] = React.useState<number | null>(null);
+  const [highlightText, setHighlightText] = React.useState<string | null>(null);
 
   // Listen for source-page-click events from ChatPanel
   React.useEffect(() => {
     function handleSourceClick(e: CustomEvent) {
       const page = e.detail?.page;
+      const text = e.detail?.text;
       if (page && typeof page === "number") {
         setViewerOpen(true);
         setScrollToPage(page);
+        if (text) setHighlightText(text);
         // Reset after a tick so the PdfViewer picks it up
         setTimeout(() => setScrollToPage(null), 500);
       }
@@ -83,6 +86,7 @@ export default function Home() {
               <PdfViewer
                 docId={activeDocId}
                 scrollToPage={scrollToPage}
+                highlightText={highlightText}
                 onClose={() => setViewerOpen(false)}
                 className="flex-1"
               />
@@ -93,6 +97,7 @@ export default function Home() {
               <PdfViewer
                 docId={activeDocId}
                 scrollToPage={scrollToPage}
+                highlightText={highlightText}
                 onClose={() => setViewerOpen(false)}
                 className="flex-1"
               />

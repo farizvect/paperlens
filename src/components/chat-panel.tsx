@@ -989,10 +989,10 @@ export function ChatPanel({ onToggleViewer, viewerOpen, onToggleSidebar, sidebar
                     sources={parsedSources}
                     onSourceClick={(source) => {
                       setSelectedSource(source);
-                      // Dispatch page event for PDF viewer
+                      // Dispatch page event for PDF viewer with chunk text for highlighting
                       if (source.page) {
                         window.dispatchEvent(
-                          new CustomEvent("source-page-click", { detail: { page: source.page } })
+                          new CustomEvent("source-page-click", { detail: { page: source.page, text: source.text } })
                         );
                       }
                     }}
