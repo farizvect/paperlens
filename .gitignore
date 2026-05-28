@@ -43,3 +43,6 @@ coverage/
 *.db-shm
 *.db-wal
 *.pdf
+
+# PDF.js worker (copied from node_modules via postinstall)
+public/pdf.worker.min.mjs
