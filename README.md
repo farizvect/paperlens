@@ -1,23 +1,50 @@
-# PDF Research Reader
+# PaperLens
 
-![PaperLens Screenshot](public/screenshot.png)
+> Upload scientific PDFs — thesis, journals, reports — and chat with AI about their content. Your documents stay in your browser, nothing leaves your device.
 
-A client-side PDF research tool. Upload scientific PDFs (theses, journals, reports), ask questions, and get AI-powered answers with source citations.
+![PaperLens Homepage](public/screenshot.png)
 
 ## Features
 
 - **Multi-PDF chat** — select multiple documents and ask questions across all of them
-- **RAG pipeline** — keyword-based search (FTS5) with first-chunks fallback, no embeddings required
+- **RAG pipeline** — keyword-based search (FTS5) with section-aware chunking, no embeddings required
 - **Source citations** — every answer includes clickable `[Source N]` references with chunk excerpts
 - **Client-side storage** — all data lives in IndexedDB (documents, chunks, chat history)
 - **BYOK API** — bring your own OpenAI-compatible API key and base URL via Settings
 - **Language-aware** — AI detects the PDF language and responds in the same language
-- **Mobile-first** — responsive sidebar, hamburger toggle, body scroll lock, bottom sheet source cards
+- **Mobile-first** — responsive sidebar, hamburger toggle, body scroll lock
 - **Drag & drop** — drop PDFs anywhere on the chat area
 - **Follow-up suggestions** — AI generates follow-up questions after each response
 - **Key quotes extraction** — one-click extraction of important quotes with citations
 - **Chat history persistence** — conversations saved per document, restored on revisit
+- **Token usage display** — shows input/output token counts per response
 - **Onboarding tutorial** — guided first-use experience
+
+## Screenshots
+
+### Upload & Document Management
+
+![Upload Interface](public/screenshot-upload.png)
+
+Upload PDFs via drag-drop or file picker. Documents are processed client-side with `unpdf` and chunked into searchable segments.
+
+### Chat with AI
+
+![Chat Interface](public/screenshot-chat.png)
+
+Ask questions about your documents and get AI-powered answers with source citations. Click `[Source N]` badges to see the exact excerpt from the PDF.
+
+### Source Citations
+
+![Source Citation Card](public/screenshot-source.png)
+
+Each source citation shows the page number, section name, and relevant text excerpt. Transparency in every answer.
+
+### BYOK Settings
+
+![Settings Dialog](public/screenshot-settings.png)
+
+Configure your own OpenAI-compatible API endpoint, key, and model. Works with any provider that supports the OpenAI API format.
 
 ## Stack
 
@@ -43,7 +70,7 @@ npm run build
 npm run start
 ```
 
-Dev server runs on `http://localhost:3000` by default.
+Dev server runs on `http://localhost:3005` by default.
 
 ## Project Structure
 
@@ -82,9 +109,9 @@ src/
 
 Click **Settings** in the sidebar to configure:
 
-- **Base URL** — any OpenAI-compatible endpoint
+- **Base URL** — any OpenAI-compatible endpoint (e.g., `https://api.openai.com/v1`)
 - **API Key** — your API key
-- **Model** — model name (e.g. `gpt-4o-mini`)
+- **Model** — model name (e.g., `gpt-4o-mini`, `gpt-4`, `claude-3-sonnet`)
 
 Settings are persisted in `localStorage`.
 
@@ -98,11 +125,19 @@ Settings are persisted in `localStorage`.
 
 ## How It Works
 
-1. **Upload** — PDF is parsed client-side with `unpdf`, chunked into ~1000-char segments
-2. **Store** — Chunks saved to IndexedDB with FTS5 full-text search index
+1. **Upload** — PDF is parsed client-side with `unpdf`, chunked into ~1000-char segments with section awareness
+2. **Store** — Chunks saved to IndexedDB with full-text search index
 3. **Query** — User question searches chunks by keywords, top 8 results selected
 4. **Stream** — Context + question sent to LLM via `/api/chat` (SSE streaming)
 5. **Display** — Response rendered as Markdown with `[Source N]` citation badges
+
+## Privacy
+
+All processing happens in your browser:
+- PDFs are parsed client-side using `unpdf`
+- Documents and chat history stored in IndexedDB
+- Only the query + relevant chunks sent to your configured API
+- No data leaves your device except what you explicitly send to the LLM
 
 ## License
 
