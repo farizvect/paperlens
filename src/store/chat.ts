@@ -41,8 +41,12 @@ interface ChatState {
   followUpSuggestions: string[];
   sidebarOpen: boolean;
   llmSettings: LlmSettings;
+  // Background streaming support
+  streamingDocId: string | null;
+  streamingMessageId: string | null;
   addMessage: (msg: ChatMessage) => void;
   appendToLast: (content: string) => void;
+  appendToMessage: (messageId: string, content: string) => void;
   setLoading: (loading: boolean) => void;
   setActiveDoc: (docId: string | null, docName?: string) => void;
   setActiveDocIds: (ids: string[]) => void;
@@ -54,6 +58,7 @@ interface ChatState {
   clear: () => void;
   saveCurrentChat: () => Promise<void>;
   setLlmSettings: (settings: Partial<LlmSettings>) => void;
+  setStreamingInfo: (docId: string | null, messageId: string | null) => void;
   hydrate: () => void;
 }
 
@@ -67,6 +72,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   followUpSuggestions: [],
   sidebarOpen: false,
   llmSettings: { baseUrl: "", apiKey: "", model: "" },
+  streamingDocId: null,
+  streamingMessageId: null,
 
   addMessage: (msg) =>
     set((state) => ({
@@ -85,14 +92,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { messages: msgs };
     }),
 
+  appendToMessage: (messageId, content) =>
+    set((state) => {
+      const msgs = state.messages.map((m) =>
+        m.id === messageId
+          ? { ...m, content: m.content + content }
+          : m
+      );
+      return { messages: msgs };
+    }),
+
   setLoading: (isLoading) => set({ isLoading }),
+
+  setStreamingInfo: (docId, messageId) =>
+    set({ streamingDocId: docId, streamingMessageId: messageId }),
 
   setActiveDoc: async (activeDocId, docName?) => {
     const state = get();
 
-    // Save current chat before switching
+    // Save previous doc's chat in background (non-blocking)
     if (state.activeDocId && state.messages.length > 0) {
-      await saveChatMessages(
+      saveChatMessages(
         state.activeDocId,
         state.messages.map((m) => ({
           id: m.id,
@@ -102,8 +122,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
           tokenUsage: m.tokenUsage,
           createdAt: m.createdAt,
         }))
-      );
+      ).catch(console.error);
     }
+
+    // Immediately update activeDocId and clear messages
+    set({
+      activeDocId,
+      activeDocName: docName ?? (activeDocId ? state.activeDocName : null),
+      activeDocIds: activeDocId ? [activeDocId] : [],
+      messages: [],
+      keyQuotes: [],
+      followUpSuggestions: [],
+      sidebarOpen: false,
+    });
 
     // Load chat for new document
     let messages: ChatMessage[] = [];
@@ -123,24 +154,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    // Sync activeDocIds with the single selection
-    const activeDocIds = activeDocId ? [activeDocId] : [];
-
-    set({
-      activeDocId,
-      activeDocName: docName ?? (activeDocId ? state.activeDocName : null),
-      activeDocIds,
-      messages,
-      keyQuotes: [],
-      followUpSuggestions: [],
-      sidebarOpen: false,
-    });
+    // Update with loaded messages
+    set({ messages });
 
     // Persist to localStorage so refresh restores the same doc
     if (activeDocId) {
       localStorage.setItem("activeDocId", activeDocId);
       localStorage.setItem("activeDocName", docName ?? state.activeDocName ?? "");
-      localStorage.setItem("activeDocIds", JSON.stringify(activeDocIds));
+      localStorage.setItem("activeDocIds", JSON.stringify([activeDocId]));
     } else {
       localStorage.removeItem("activeDocId");
       localStorage.removeItem("activeDocName");
@@ -151,9 +172,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveDocIds: async (ids: string[]) => {
     const state = get();
 
-    // Save current chat before switching
+    // Save previous doc's chat in background (non-blocking)
     if (state.activeDocId && state.messages.length > 0) {
-      await saveChatMessages(
+      saveChatMessages(
         state.activeDocId,
         state.messages.map((m) => ({
           id: m.id,
@@ -163,11 +184,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
           tokenUsage: m.tokenUsage,
           createdAt: m.createdAt,
         }))
-      );
+      ).catch(console.error);
     }
 
+    // Immediately clear messages to prevent stale content
+    const tempDocId = ids.length === 1 ? ids[0] : ids.length > 1 ? ids.sort().join(",") : null;
+    set({
+      activeDocIds: ids,
+      activeDocId: tempDocId,
+      messages: [],
+      keyQuotes: [],
+      followUpSuggestions: [],
+    });
+
     // Load chat for the first selected doc (or combined key)
-    const chatKey = ids.length === 1 ? ids[0] : ids.length > 1 ? ids.sort().join(",") : null;
+    const chatKey = tempDocId;
     let messages: ChatMessage[] = [];
     if (chatKey) {
       try {
@@ -185,7 +216,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    const activeDocId = ids.length === 1 ? ids[0] : chatKey;
+    const activeDocId = chatKey;
     let activeDocName: string | null;
     if (ids.length === 1) {
       // Look up actual doc name from IndexedDB
@@ -203,12 +234,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     set({
-      activeDocIds: ids,
       activeDocId,
       activeDocName,
       messages,
-      keyQuotes: [],
-      followUpSuggestions: [],
     });
 
     localStorage.setItem("activeDocIds", JSON.stringify(ids));

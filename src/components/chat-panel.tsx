@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { useChatStore, type ChatMessage } from "@/store/chat";
+import { useChatStore, type ChatMessage, type TokenUsage } from "@/store/chat";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageBubble } from "@/components/message-bubble";
@@ -22,6 +22,8 @@ import {
   getDocChunks,
   saveDocument,
   saveChunks,
+  saveChatMessages,
+  loadChatMessages,
   rankChunks,
   type StoredDocument,
   type StoredChunk,
@@ -43,7 +45,7 @@ export function ChatPanel() {
   const activeDocId = useChatStore((s) => s.activeDocId);
   const activeDocName = useChatStore((s) => s.activeDocName);
   const addMessage = useChatStore((s) => s.addMessage);
-  const appendToLast = useChatStore((s) => s.appendToLast);
+  const appendToMessage = useChatStore((s) => s.appendToMessage);
   const setLoading = useChatStore((s) => s.setLoading);
   const toggleSidebar = useChatStore((s) => s.toggleSidebar);
   const setActiveDoc = useChatStore((s) => s.setActiveDoc);
@@ -62,6 +64,17 @@ export function ChatPanel() {
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const abortControllerRef = React.useRef<AbortController | null>(null);
+  const streamDocIdRef = React.useRef<string | null>(null);
+  const streamBufferRef = React.useRef<string>("");
+  const streamSourcesRef = React.useRef<string | undefined>(undefined);
+  const streamUsageRef = React.useRef<TokenUsage | undefined>(undefined);
+  const streamSuggestionsRef = React.useRef<string[] | undefined>(undefined);
+
+  // Track activeDocId changes (no abort — streams continue in background)
+  React.useEffect(() => {
+    // Just a tracker, no cleanup needed
+  }, [activeDocId]);
 
   // Restore chat history on mount if activeDocId was restored from localStorage
   React.useEffect(() => {
@@ -78,10 +91,29 @@ export function ChatPanel() {
   }, []);
 
 
-  // Auto-scroll to bottom on new messages (defer to next frame so layout settles)
+  // Auto-scroll to bottom only if user is already near the bottom
+  const isNearBottomRef = React.useRef(true);
+
+  // Track if user is near bottom
   React.useEffect(() => {
     const container = scrollContainerRef.current;
-    if (container && messages.length > 0) {
+    if (!container) return;
+
+    const handleScroll = () => {
+      const threshold = 150; // px from bottom
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < threshold;
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll(); // Initial check
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Auto-scroll on new messages only if user is near bottom
+  React.useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (container && messages.length > 0 && isNearBottomRef.current) {
       requestAnimationFrame(() => {
         container.scrollTop = container.scrollHeight;
       });
@@ -223,6 +255,9 @@ export function ChatPanel() {
     const state = useChatStore.getState();
     if (!text.trim() || (!state.activeDocId && activeDocIds.length === 0) || state.isLoading) return;
 
+    // Force scroll to bottom when user sends a message
+    isNearBottomRef.current = true;
+
     setSelectedSource(null);
     setSuggestions([]);
 
@@ -242,6 +277,13 @@ export function ChatPanel() {
     };
     addMessage(assistantMsg);
     setLoading(true);
+
+    // Track which doc this stream belongs to
+    const streamDocId = state.activeDocId;
+    streamDocIdRef.current = streamDocId;
+    streamBufferRef.current = "";
+    streamSourcesRef.current = undefined;
+    streamUsageRef.current = undefined;
 
     try {
       // Multi-PDF search: search across all active doc IDs
@@ -290,6 +332,7 @@ export function ChatPanel() {
         .map((m) => ({ role: m.role, content: m.content }));
 
       const controller = new AbortController();
+      abortControllerRef.current = controller;
       const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min
 
       // Include BYOK overrides if set
@@ -348,30 +391,80 @@ export function ChatPanel() {
       while (true) {
         let readResult;
         try {
+          // If tab is hidden, wait for it to become visible before reading
+          if (document.hidden) {
+            await new Promise<void>((resolve) => {
+              const timeout = setTimeout(() => {
+                document.removeEventListener("visibilitychange", onVisible);
+                resolve(); // Timeout — proceed with read attempt
+              }, 30000); // 30s max wait
+              const onVisible = () => {
+                if (!document.hidden) {
+                  clearTimeout(timeout);
+                  document.removeEventListener("visibilitychange", onVisible);
+                  resolve();
+                }
+              };
+              document.addEventListener("visibilitychange", onVisible);
+              // Already visible guard
+              if (!document.hidden) {
+                clearTimeout(timeout);
+                document.removeEventListener("visibilitychange", onVisible);
+                resolve();
+              }
+            });
+          }
           readResult = await reader.read();
         } catch (readErr) {
-          // Stream interrupted (tab switch, network drop) — try to continue
-          if (buffer.trim()) {
-            // Process remaining buffer before giving up
-            const remaining = buffer.split("\n");
-            for (const line of remaining) {
-              if (line.startsWith("data: ") && line.slice(6) !== "[DONE]") {
-                try {
-                  const parsed = JSON.parse(line.slice(6));
-                  if (parsed.type === "content" && parsed.content) {
-                    appendToLast(parsed.content);
-                  }
-                } catch { /* ignore */ }
-              }
+          // Stream interrupted (tab switch, network drop)
+          // If tab is hidden, wait for visibility before giving up
+          if (document.hidden) {
+            await new Promise<void>((resolve) => {
+              const timeout = setTimeout(() => {
+                document.removeEventListener("visibilitychange", onVisible);
+                resolve();
+              }, 30000);
+              const onVisible = () => {
+                if (!document.hidden) {
+                  clearTimeout(timeout);
+                  document.removeEventListener("visibilitychange", onVisible);
+                  resolve();
+                }
+              };
+              document.addEventListener("visibilitychange", onVisible);
+            });
+            // Try reading again after becoming visible
+            try {
+              readResult = await reader.read();
+            } catch {
+              // Still failing — fall through to error handling
             }
           }
-          // If we already have content, treat as partial completion rather than error
-          const currentState = useChatStore.getState();
-          const lastMsg = currentState.messages[currentState.messages.length - 1];
-          if (lastMsg?.content?.length > 10) {
-            break; // Have enough content — treat as done
+
+          if (!readResult) {
+            // Process remaining buffer before giving up
+            if (buffer.trim()) {
+              const remaining = buffer.split("\n");
+              for (const line of remaining) {
+                if (line.startsWith("data: ") && line.slice(6) !== "[DONE]") {
+                  try {
+                    const parsed = JSON.parse(line.slice(6));
+                    if (parsed.type === "content" && parsed.content) {
+                      appendToMessage(assistantMsg.id, parsed.content);
+                      streamBufferRef.current += parsed.content;
+                    }
+                  } catch { /* ignore */ }
+                }
+              }
+            }
+            // If we have content, treat as partial completion
+            const currentState = useChatStore.getState();
+            const lastMsg = currentState.messages[currentState.messages.length - 1];
+            if (lastMsg?.content?.length > 10 || streamBufferRef.current.length > 10) {
+              break;
+            }
+            throw new Error("Connection interrupted. Please try again.");
           }
-          throw new Error("Connection interrupted. Please try again.");
         }
         const { done, value } = readResult;
         if (done) break;
@@ -389,32 +482,49 @@ export function ChatPanel() {
             try {
               const parsed = JSON.parse(data);
               if (parsed.type === "content" && parsed.content) {
-                appendToLast(parsed.content);
+                // Append to message by ID (works even if viewing different doc)
+                appendToMessage(assistantMsg.id, parsed.content);
+                // Also buffer for background save
+                streamBufferRef.current += parsed.content;
               }
               if (parsed.type === "sources" && parsed.sources) {
-                const store = useChatStore.getState();
-                const msgs = [...store.messages];
-                if (msgs.length > 0) {
-                  msgs[msgs.length - 1] = {
-                    ...msgs[msgs.length - 1],
-                    sources: JSON.stringify(parsed.sources),
-                  };
-                  useChatStore.setState({ messages: msgs });
+                const sourcesStr = JSON.stringify(parsed.sources);
+                streamSourcesRef.current = sourcesStr;
+                // Update if viewing the same doc
+                if (useChatStore.getState().activeDocId === streamDocId) {
+                  const store = useChatStore.getState();
+                  const msgs = [...store.messages];
+                  if (msgs.length > 0) {
+                    msgs[msgs.length - 1] = {
+                      ...msgs[msgs.length - 1],
+                      sources: sourcesStr,
+                    };
+                    useChatStore.setState({ messages: msgs });
+                  }
                 }
               }
               if (parsed.type === "usage" && parsed.usage) {
-                const store = useChatStore.getState();
-                const msgs = [...store.messages];
-                if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
-                  msgs[msgs.length - 1] = {
-                    ...msgs[msgs.length - 1],
-                    tokenUsage: parsed.usage,
-                  };
-                  useChatStore.setState({ messages: msgs });
+                streamUsageRef.current = parsed.usage;
+                // Update if viewing the same doc
+                if (useChatStore.getState().activeDocId === streamDocId) {
+                  const store = useChatStore.getState();
+                  const msgs = [...store.messages];
+                  if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
+                    msgs[msgs.length - 1] = {
+                      ...msgs[msgs.length - 1],
+                      tokenUsage: parsed.usage,
+                    };
+                    useChatStore.setState({ messages: msgs });
+                  }
                 }
               }
               if (parsed.type === "suggestions" && parsed.suggestions) {
-                setSuggestions(parsed.suggestions);
+                // Save suggestions for background save
+                streamSuggestionsRef.current = parsed.suggestions;
+                // Only set suggestions if still viewing the same doc
+                if (useChatStore.getState().activeDocId === streamDocId) {
+                  setSuggestions(parsed.suggestions);
+                }
 
                 // Strip <suggestions> tag from the last assistant message content
                 const store = useChatStore.getState();
@@ -431,7 +541,8 @@ export function ChatPanel() {
                 }
               }
             } catch {
-              appendToLast(data);
+              appendToMessage(assistantMsg.id, data);
+              streamBufferRef.current += data;
             }
           }
         }
@@ -456,16 +567,59 @@ export function ChatPanel() {
           useChatStore.setState({ messages: msgs });
         } else {
           // Partial response — append error (user keeps what was received)
-          appendToLast(`\n\n*Error: ${errorMsg}*${retryHint}`);
+          appendToMessage(assistantMsg.id, `\n\n*Error: ${errorMsg}*${retryHint}`);
         }
       }
     } finally {
+      abortControllerRef.current = null;
       setLoading(false);
-      try {
-        await useChatStore.getState().saveCurrentChat();
-      } catch {
-        // Silent fail
+
+      // Save stream results
+      const currentActiveDocId = useChatStore.getState().activeDocId;
+      const isBackgroundStream = streamDocId && streamDocId !== currentActiveDocId;
+
+      if (isBackgroundStream && streamBufferRef.current) {
+        // Background stream: save directly to IndexedDB for the streaming doc
+        try {
+          const existingMessages = await loadChatMessages(streamDocId!);
+          const bgAssistantMsg: ChatMessage = {
+            id: assistantMsg.id,
+            role: "assistant",
+            content: streamBufferRef.current,
+            sources: streamSourcesRef.current,
+            tokenUsage: streamUsageRef.current,
+            createdAt: new Date(),
+          };
+          // Add user + assistant messages
+          const updatedMessages = [
+            ...existingMessages,
+            { id: userMsg.id, role: "user" as const, content: userMsg.content, createdAt: userMsg.createdAt },
+            bgAssistantMsg,
+          ];
+          await saveChatMessages(streamDocId!, updatedMessages);
+
+          // Save suggestions for the background doc
+          if (streamSuggestionsRef.current && streamSuggestionsRef.current.length > 0) {
+            localStorage.setItem(`suggestions:${streamDocId}`, JSON.stringify(streamSuggestionsRef.current));
+          }
+        } catch (err) {
+          console.error("Failed to save background stream:", err);
+        }
+      } else {
+        // Normal stream: save current chat (includes the streamed content)
+        try {
+          await useChatStore.getState().saveCurrentChat();
+        } catch {
+          // Silent fail
+        }
       }
+
+      // Clear streaming refs
+      streamDocIdRef.current = null;
+      streamBufferRef.current = "";
+      streamSourcesRef.current = undefined;
+      streamUsageRef.current = undefined;
+      streamSuggestionsRef.current = undefined;
     }
   }
 
@@ -535,7 +689,7 @@ export function ChatPanel() {
 
   function handleSummarize() {
     const summarizePrompt =
-      "Buatkan rangkuman lengkap dari dokumen ini dalam Bahasa Indonesia. Sertakan poin-poin utama, temuan penting, dan kesimpulan. Format dengan heading dan bullet points.";
+      "Provide a comprehensive summary of this document. Include the main points, key findings, and conclusions. Format with headings and bullet points.";
     doSendMessage(summarizePrompt);
   }
 

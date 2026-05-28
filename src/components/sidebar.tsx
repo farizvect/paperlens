@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { FileText, Search, Trash2, X, Loader2, Settings, Check, Square, CheckSquare } from "lucide-react";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   listDocuments,
   saveDocument,
@@ -44,6 +45,11 @@ export function Sidebar({ onSettingsClick }: { onSettingsClick?: () => void }) {
   const [uploading, setUploading] = React.useState(false);
   const searchTimeout = React.useRef<ReturnType<typeof setTimeout>>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [confirmModal, setConfirmModal] = React.useState<{
+    open: boolean;
+    docId: string;
+    docName: string;
+  }>({ open: false, docId: "", docName: "" });
 
   // Track closing state for exit animation
   const [isClosing, setIsClosing] = React.useState(false);
@@ -191,7 +197,24 @@ export function Sidebar({ onSettingsClick }: { onSettingsClick?: () => void }) {
 
   function handleCheckboxClick(e: React.MouseEvent, docId: string) {
     e.stopPropagation();
-    toggleDocSelection(docId);
+    const doc = documents.find((d) => d.id === docId);
+    const isSelected = activeDocIds.includes(docId);
+
+    // If deselecting or already have 1 doc selected, show confirmation for merge
+    if (!isSelected && activeDocIds.length >= 1) {
+      setConfirmModal({
+        open: true,
+        docId,
+        docName: doc?.name ?? "Document",
+      });
+    } else {
+      toggleDocSelection(docId);
+    }
+  }
+
+  function handleConfirmMerge() {
+    toggleDocSelection(confirmModal.docId);
+    setConfirmModal({ open: false, docId: "", docName: "" });
   }
 
   const selectedCount = activeDocIds.length;
@@ -350,28 +373,26 @@ export function Sidebar({ onSettingsClick }: { onSettingsClick?: () => void }) {
               }}
             />
 
-            {/* Upload — only when documents exist */}
-            {documents.length > 0 && (
-              <div className="px-4 pt-4">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className={cn(
-                    "w-full inline-flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[#e0ded6] bg-[#f5f4ed] px-4 py-3 text-sm text-[#8a8a82] hover:border-[#1B365D]/30 hover:bg-[#f0efe8] hover:text-[#1B365D] transition-colors cursor-pointer disabled:opacity-50 disabled:pointer-events-none",
-                    uploading && "animate-upload-pulse"
-                  )}
-                >
-                  {uploading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    "+ Upload PDF"
-                  )}
-                </button>
-              </div>
-            )}
+            {/* Upload — always visible */}
+            <div className="px-4 pt-4">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className={cn(
+                  "w-full inline-flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[#e0ded6] bg-[#f5f4ed] px-4 py-3 text-sm text-[#8a8a82] hover:border-[#1B365D]/30 hover:bg-[#f0efe8] hover:text-[#1B365D] transition-colors cursor-pointer disabled:opacity-50 disabled:pointer-events-none",
+                  uploading && "animate-upload-pulse"
+                )}
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  "+ Upload PDF"
+                )}
+              </button>
+            </div>
 
             {/* Search */}
             <div className="relative px-4 pt-4 pb-2">
@@ -444,6 +465,16 @@ export function Sidebar({ onSettingsClick }: { onSettingsClick?: () => void }) {
               Settings
             </button>
           </div>
+
+          {/* Merge confirmation modal */}
+          <ConfirmModal
+            open={confirmModal.open}
+            onClose={() => setConfirmModal({ open: false, docId: "", docName: "" })}
+            onConfirm={handleConfirmMerge}
+            title="Merge documents?"
+            description={`Add "${confirmModal.docName}" to the current chat? Messages will search across both documents.`}
+            confirmText="Merge"
+          />
         </aside>
       </>
     );
@@ -484,28 +515,26 @@ export function Sidebar({ onSettingsClick }: { onSettingsClick?: () => void }) {
           }}
         />
 
-        {/* Upload — only when documents exist */}
-        {documents.length > 0 && (
-          <div className="px-4 pt-4">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className={cn(
-                "w-full inline-flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[#e0ded6] bg-[#f5f4ed] px-4 py-3 text-sm text-[#8a8a82] hover:border-[#1B365D]/30 hover:bg-[#f0efe8] hover:text-[#1B365D] transition-colors cursor-pointer disabled:opacity-50 disabled:pointer-events-none",
-                uploading && "animate-upload-pulse"
-              )}
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                "+ Upload PDF"
-              )}
-            </button>
-          </div>
-        )}
+        {/* Upload — always visible */}
+        <div className="px-4 pt-4">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className={cn(
+              "w-full inline-flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[#e0ded6] bg-[#f5f4ed] px-4 py-3 text-sm text-[#8a8a82] hover:border-[#1B365D]/30 hover:bg-[#f0efe8] hover:text-[#1B365D] transition-colors cursor-pointer disabled:opacity-50 disabled:pointer-events-none",
+              uploading && "animate-upload-pulse"
+            )}
+          >
+            {uploading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Processing...
+              </>
+            ) : (
+              "+ Upload PDF"
+            )}
+          </button>
+        </div>
 
         {/* Search */}
         <div className="relative px-4 pt-4 pb-2">
@@ -578,6 +607,16 @@ export function Sidebar({ onSettingsClick }: { onSettingsClick?: () => void }) {
           Settings
         </button>
       </div>
+
+      {/* Merge confirmation modal */}
+      <ConfirmModal
+        open={confirmModal.open}
+        onClose={() => setConfirmModal({ open: false, docId: "", docName: "" })}
+        onConfirm={handleConfirmMerge}
+        title="Merge documents?"
+        description={`Add "${confirmModal.docName}" to the current chat? Messages will search across both documents.`}
+        confirmText="Merge"
+      />
     </aside>
   );
 }
