@@ -272,21 +272,56 @@ After your complete answer, suggest 2-3 relevant follow-up questions the user mi
         }
 
         // After stream is complete, parse suggestions from accumulated content
-        const suggestionsMatch = accumulatedContent.match(
-          /<(?:suggestions|follow_up_questions|follow-up-questions)>\s*(\[[\s\S]*?\])\s*<\/(?:suggestions|follow_up_questions|follow-up-questions)>/
-        );
-        if (suggestionsMatch) {
-          try {
-            const suggestions = JSON.parse(suggestionsMatch[1]);
-            if (Array.isArray(suggestions) && suggestions.length > 0) {
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({ type: "suggestions", suggestions })}\n\n`
-                )
-              );
+        // Try multiple regex patterns: complete tags, then partial/truncated tags
+        const suggestionPatterns = [
+          // Complete: <suggestions>["..."]</suggestions>
+          /<(?:suggestions|follow_up_questions|follow-up-questions)>\s*(\[[\s\S]*?\])\s*<\/(?:suggestions|follow_up_questions|follow-up-questions)>/,
+          // Truncated closing tag: <suggestions>["..."]</uggestion (missing s)
+          /<(?:suggestions|follow_up_questions|follow-up-questions)>\s*(\[[\s\S]*?\])\s*<\/[a-z_-]*/,
+          // No closing tag but has JSON array: <suggestions>["...", "..."]
+          /<(?:suggestions|follow_up_questions|follow-up-questions)>\s*(\[[\s\S]*\])\s*$/,
+        ];
+        let suggestionsParsed = false;
+        for (const pattern of suggestionPatterns) {
+          const match = accumulatedContent.match(pattern);
+          if (match) {
+            try {
+              const suggestions = JSON.parse(match[1]);
+              if (Array.isArray(suggestions) && suggestions.length > 0) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({ type: "suggestions", suggestions })}\n\n`
+                  )
+                );
+                suggestionsParsed = true;
+                break;
+              }
+            } catch {
+              // JSON truncated — try to salvage partial array
+              try {
+                // Close open strings and brackets
+                let partial = match[1].trim();
+                if (!partial.endsWith(']')) {
+                  // Close any open string
+                  const lastQuote = partial.lastIndexOf('"');
+                  const lastCloseQuote = partial.lastIndexOf('"', lastQuote - 1);
+                  if (lastQuote > lastCloseQuote) partial += '"';
+                  if (!partial.endsWith(']')) partial += ']';
+                }
+                const suggestions = JSON.parse(partial);
+                if (Array.isArray(suggestions) && suggestions.length > 0) {
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ type: "suggestions", suggestions })}\n\n`
+                    )
+                  );
+                  suggestionsParsed = true;
+                  break;
+                }
+              } catch {
+                // Truly unparseable — skip
+              }
             }
-          } catch {
-            // Invalid JSON in suggestions tag — skip
           }
         }
       } finally {

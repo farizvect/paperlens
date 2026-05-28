@@ -207,8 +207,13 @@ export function ChatPanel() {
   // Strip suggestions/follow-up tags from content for display
   function stripSuggestionsTag(content: string): string {
     return content
+      // Complete tags: <suggestions>["..."]</suggestions>
       .replace(/\n?<(?:suggestions|follow_up_questions|follow-up-questions)>\s*\[[\s\S]*?\]\s*<\/(?:suggestions|follow_up_questions|follow-up-questions)>/g, "")
       .replace(/\n?<(?:suggestions|follow_up_questions|follow-up-questions)>[\s\S]*?<\/(?:suggestions|follow_up_questions|follow-up-questions)>/g, "")
+      // Truncated closing tag: <suggestions>["..."]</uggestion (missing s)
+      .replace(/\n?<(?:suggestions|follow_up_questions|follow-up-questions)>\s*\[[\s\S]*?\]\s*<\/[a-z_-]*/g, "")
+      // No closing tag: <suggestions>["...", "..."]  (end of message)
+      .replace(/\n?<(?:suggestions|follow_up_questions|follow-up-questions)>\s*\[[\s\S]*$/, "")
       .trim();
   }
 
@@ -294,8 +299,11 @@ export function ChatPanel() {
       if (llm.model) llmOverrides.model = llm.model;
 
       let res: Response;
-      try {
-        res = await fetch("/api/chat", {
+      const MAX_RETRIES = 2;
+      let retryCount = 0;
+      const fetchWithRetry = async (): Promise<Response> => {
+        try {
+          return await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -304,17 +312,24 @@ export function ChatPanel() {
             history,
             ...llmOverrides,
           }),
-          signal: controller.signal,
-        });
-      } catch (fetchErr) {
-        clearTimeout(timeout);
-        if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
-          throw new Error("Request timed out. The AI took too long to respond.");
+            signal: controller.signal,
+          });
+        } catch (fetchErr) {
+          if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+            throw new Error("Request timed out. The AI took too long to respond.");
+          }
+          // Network error — retry
+          if (retryCount < MAX_RETRIES) {
+            retryCount++;
+            await new Promise(r => setTimeout(r, 1000 * retryCount));
+            return fetchWithRetry();
+          }
+          throw new Error(
+            "Network error. Check your connection and try again."
+          );
         }
-        throw new Error(
-          "Cannot reach server. Check your connection and make sure you're on the same network."
-        );
-      }
+      };
+      res = await fetchWithRetry();
       clearTimeout(timeout);
 
       if (!res.ok) {
@@ -330,7 +345,34 @@ export function ChatPanel() {
       let buffer = "";
 
       while (true) {
-        const { done, value } = await reader.read();
+        let readResult;
+        try {
+          readResult = await reader.read();
+        } catch (readErr) {
+          // Stream interrupted (tab switch, network drop) — try to continue
+          if (buffer.trim()) {
+            // Process remaining buffer before giving up
+            const remaining = buffer.split("\n");
+            for (const line of remaining) {
+              if (line.startsWith("data: ") && line.slice(6) !== "[DONE]") {
+                try {
+                  const parsed = JSON.parse(line.slice(6));
+                  if (parsed.type === "content" && parsed.content) {
+                    appendToLast(parsed.content);
+                  }
+                } catch { /* ignore */ }
+              }
+            }
+          }
+          // If we already have content, treat as partial completion rather than error
+          const currentState = useChatStore.getState();
+          const lastMsg = currentState.messages[currentState.messages.length - 1];
+          if (lastMsg?.content?.length > 10) {
+            break; // Have enough content — treat as done
+          }
+          throw new Error("Connection interrupted. Please try again.");
+        }
+        const { done, value } = readResult;
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
@@ -395,21 +437,25 @@ export function ChatPanel() {
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Something went wrong";
-      // Replace empty assistant message with error + retry
+      const isNetworkError = errorMsg.toLowerCase().includes("network") || 
+                             errorMsg.toLowerCase().includes("connection") ||
+                             errorMsg.toLowerCase().includes("interrupted");
+      // Replace empty assistant message with error + retry hint
       const store = useChatStore.getState();
       const msgs = [...store.messages];
       if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
         const lastMsg = msgs[msgs.length - 1];
+        const retryHint = isNetworkError ? "\n\n_Tap the retry button or send the message again._" : "";
         if (!lastMsg.content) {
           // Empty response — replace with error
           msgs[msgs.length - 1] = {
             ...lastMsg,
-            content: `*Error: ${errorMsg}*`,
+            content: `*Error: ${errorMsg}*${retryHint}`,
           };
           useChatStore.setState({ messages: msgs });
         } else {
-          // Partial response — append error
-          appendToLast(`\n\n*Error: ${errorMsg}*`);
+          // Partial response — append error (user keeps what was received)
+          appendToLast(`\n\n*Error: ${errorMsg}*${retryHint}`);
         }
       }
     } finally {
