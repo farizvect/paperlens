@@ -898,6 +898,18 @@ export function ChatPanel({ onToggleViewer, viewerOpen, onToggleSidebar, sidebar
         {/* Desktop header */}
         <div className="hidden md:flex items-center justify-between border-b border-[#e0ded6] bg-[#faf9f3] px-6 py-2">
           <div className="flex items-center gap-2">
+            {onToggleSidebar && (
+              <button
+                onClick={onToggleSidebar}
+                className="rounded-lg p-1.5 text-[#8a8a82] hover:bg-[#f5f4ed] hover:text-[#2a2a28] transition-colors"
+                title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+              >
+                {sidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+              </button>
+            )}
+            {sidebarCollapsed && (
+              <h2 className="text-sm font-medium text-[#1B365D]">PaperLens</h2>
+            )}
             <h2 className="text-sm font-medium text-[#1B365D] truncate max-w-md">
               {activeDocName || "Chat"}
             </h2>
@@ -905,6 +917,22 @@ export function ChatPanel({ onToggleViewer, viewerOpen, onToggleSidebar, sidebar
               <span className="rounded-full bg-[#1B365D]/10 px-2 py-0.5 text-xs text-[#1B365D]">
                 {effectiveDocIds.length} docs
               </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {onToggleViewer && (
+              <button
+                onClick={onToggleViewer}
+                className={cn(
+                  "rounded-lg p-1.5 transition-colors",
+                  viewerOpen
+                    ? "bg-[#1B365D]/10 text-[#1B365D]"
+                    : "text-[#8a8a82] hover:bg-[#f5f4ed] hover:text-[#2a2a28]"
+                )}
+                title={viewerOpen ? "Close PDF viewer" : "Open PDF viewer"}
+              >
+                {viewerOpen ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
             )}
           </div>
         </div>
