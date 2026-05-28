@@ -12,7 +12,9 @@ import { cn } from "@/lib/utils";
 
 export default function Home() {
   const sidebarOpen = useChatStore((s) => s.sidebarOpen);
+  const sidebarCollapsed = useChatStore((s) => s.sidebarCollapsed);
   const setSidebarOpen = useChatStore((s) => s.setSidebarOpen);
+  const toggleSidebarCollapsed = useChatStore((s) => s.toggleSidebarCollapsed);
   const activeDocId = useChatStore((s) => s.activeDocId);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [viewerOpen, setViewerOpen] = React.useState(false);
@@ -35,10 +37,12 @@ export default function Home() {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-[#f5f4ed]">
-      {/* Desktop sidebar — always visible */}
-      <div className="hidden md:flex">
-        <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
-      </div>
+      {/* Desktop sidebar — collapsible */}
+      {!sidebarCollapsed && (
+        <div className="hidden md:flex">
+          <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
+        </div>
+      )}
 
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
@@ -63,6 +67,8 @@ export default function Home() {
           <ChatPanel
             onToggleViewer={() => setViewerOpen((v) => !v)}
             viewerOpen={viewerOpen}
+            onToggleSidebar={toggleSidebarCollapsed}
+            sidebarCollapsed={sidebarCollapsed}
           />
         </div>
 

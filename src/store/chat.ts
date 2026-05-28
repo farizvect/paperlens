@@ -40,6 +40,7 @@ interface ChatState {
   keyQuotes: string[];
   followUpSuggestions: string[];
   sidebarOpen: boolean;
+  sidebarCollapsed: boolean;
   llmSettings: LlmSettings;
   // Background streaming support
   streamingDocId: string | null;
@@ -55,6 +56,8 @@ interface ChatState {
   setFollowUpSuggestions: (suggestions: string[]) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  toggleSidebarCollapsed: () => void;
   clear: () => void;
   saveCurrentChat: () => Promise<void>;
   setLlmSettings: (settings: Partial<LlmSettings>) => void;
@@ -71,6 +74,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   keyQuotes: [],
   followUpSuggestions: [],
   sidebarOpen: false,
+  sidebarCollapsed: false,
   llmSettings: { baseUrl: "", apiKey: "", model: "" },
   streamingDocId: null,
   streamingMessageId: null,
@@ -263,6 +267,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+  setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+  toggleSidebarCollapsed: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
   setLlmSettings: (partial) => {
     const current = get().llmSettings;
