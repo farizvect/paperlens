@@ -8,6 +8,7 @@ export interface ParsedPDF {
 export async function parsePDFFile(file: File): Promise<ParsedPDF> {
   // Dynamic import to avoid SSR issues (pdfjs-dist needs browser APIs)
   const { pdfjs } = await import("react-pdf");
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
   const buffer = await file.arrayBuffer();
   const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
   const pdf = await loadingTask.promise;
