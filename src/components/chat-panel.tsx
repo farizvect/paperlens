@@ -15,6 +15,7 @@ import {
   Upload,
   CheckCircle2,
   Quote,
+  BookOpen,
 } from "lucide-react";
 import {
   searchChunks,
@@ -532,6 +533,12 @@ export function ChatPanel() {
     doSendMessage(quotePrompt);
   }
 
+  function handleSummarize() {
+    const summarizePrompt =
+      "Buatkan rangkuman lengkap dari dokumen ini dalam Bahasa Indonesia. Sertakan poin-poin utama, temuan penting, dan kesimpulan. Format dengan heading dan bullet points.";
+    doSendMessage(summarizePrompt);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -856,9 +863,17 @@ export function ChatPanel() {
           </div>
         )}
 
-        {/* Key Quotes — above input */}
+        {/* Quick actions — above input */}
         <div className="shrink-0 border-t border-[#e0ded6] bg-[#faf9f3] px-4 pt-2 pb-1 md:px-6">
-          <div className="mx-auto max-w-3xl flex items-center">
+          <div className="mx-auto max-w-3xl flex items-center gap-2">
+            <button
+              onClick={handleSummarize}
+              disabled={isLoading}
+              className="inline-flex items-center gap-1 rounded-full border border-[#e0ded6] bg-[#faf9f3] px-3 py-1 text-xs text-[#8a8a82] hover:border-[#1B365D]/30 hover:text-[#1B365D] transition-colors disabled:opacity-50"
+            >
+              <BookOpen className="h-3 w-3" />
+              Summarize
+            </button>
             <button
               onClick={handleKeyQuotes}
               disabled={isLoading}
