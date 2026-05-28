@@ -1,7 +1,7 @@
 "use client";
 
 const DB_NAME = "paperlens";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export interface StoredDocument {
   id: string;
@@ -55,6 +55,10 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains("chats")) {
         const chatStore = db.createObjectStore("chats", { keyPath: "id" });
         chatStore.createIndex("docId", "docId", { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains("pdfblobs")) {
+        db.createObjectStore("pdfblobs", { keyPath: "docId" });
       }
     };
 
@@ -164,17 +168,19 @@ export async function searchChunks(
 
     const chunks: StoredChunk[] = [];
 
-    // Split query into keywords for flexible matching
-    const keywords = query
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((t) => t.length > 2);
+    // Tokenize query for BM25 + fuzzy matching
+    const queryTerms = tokenize(query);
+    const trigrams = buildTrigrams(query.toLowerCase());
 
     const processChunk = (chunk: StoredChunk) => {
       if (docIdSet && !docIdSet.has(chunk.docId)) return;
       const textLower = chunk.text.toLowerCase();
-      // Match if any keyword is present (not the full query)
-      if (keywords.some((kw) => textLower.includes(kw))) {
+
+      // Match if: any query term appears OR any trigram matches (fuzzy)
+      const hasKeywordMatch = queryTerms.some((t) => textLower.includes(t));
+      const hasTrigramMatch = trigrams.some((tri) => textLower.includes(tri));
+
+      if (hasKeywordMatch || hasTrigramMatch) {
         chunks.push(chunk);
       }
     };
@@ -183,7 +189,7 @@ export async function searchChunks(
     const resolveWithRanked = () => {
       if (resolved) return;
       resolved = true;
-      resolve(rankChunks(chunks, query).slice(0, limit));
+      resolve(bm25Rank(chunks, query).slice(0, limit));
     };
 
     if (docIdSet && docIdSet.size === 1) {
@@ -192,7 +198,7 @@ export async function searchChunks(
       const req = idx.openCursor(IDBKeyRange.only(singleDocId));
       req.onsuccess = () => {
         const cursor = req.result;
-        if (cursor && chunks.length < limit * 3) {
+        if (cursor && chunks.length < limit * 4) {
           processChunk(cursor.value);
           cursor.continue();
         } else {
@@ -204,7 +210,7 @@ export async function searchChunks(
       const req = store.openCursor();
       req.onsuccess = () => {
         const cursor = req.result;
-        if (cursor && chunks.length < limit * 5) {
+        if (cursor && chunks.length < limit * 6) {
           processChunk(cursor.value);
           cursor.continue();
         } else {
@@ -214,29 +220,128 @@ export async function searchChunks(
       req.onerror = () => reject(req.error);
     }
 
-    // Safety: resolve on transaction complete if cursor didn't
     tx.oncomplete = () => {
-      // Only resolve if we haven't already (cursor may have already resolved)
       resolveWithRanked();
     };
   });
 }
 
-export function rankChunks(chunks: StoredChunk[], query: string): StoredChunk[] {
-  const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+// ---- Search helpers: BM25 + Trigram fuzzy matching ----
+
+/** Tokenize text into lowercase terms, stripping punctuation and short words */
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 2);
+}
+
+/** Build character trigrams from a string for fuzzy matching */
+function buildTrigrams(text: string): string[] {
+  const clean = text.replace(/[^\w]/g, "").toLowerCase();
+  if (clean.length < 3) return [clean];
+  const trigrams: string[] = [];
+  for (let i = 0; i <= clean.length - 3; i++) {
+    trigrams.push(clean.slice(i, i + 3));
+  }
+  return [...new Set(trigrams)];
+}
+
+/**
+ * BM25 ranking — much better than raw term frequency.
+ * Uses standard BM25 parameters: k1=1.5, b=0.75
+ */
+export function bm25Rank(chunks: StoredChunk[], query: string): StoredChunk[] {
+  const terms = tokenize(query);
   if (terms.length === 0) return chunks;
+
+  const k1 = 1.5;
+  const b = 0.75;
+
+  // Compute avg document length
+  const avgDl = chunks.reduce((sum, c) => sum + c.text.split(/\s+/).length, 0) / (chunks.length || 1);
+  const N = chunks.length;
+
+  // Build IDF for each term
+  const idf: Record<string, number> = {};
+  for (const term of terms) {
+    const docsWithTerm = chunks.filter((c) => c.text.toLowerCase().includes(term)).length;
+    // BM25 IDF: log((N - n + 0.5) / (n + 0.5) + 1)
+    idf[term] = Math.log((N - docsWithTerm + 0.5) / (docsWithTerm + 0.5) + 1);
+  }
 
   return chunks
     .map((chunk) => {
-      const lower = chunk.text.toLowerCase();
+      const textLower = chunk.text.toLowerCase();
+      const dl = chunk.text.split(/\s+/).length;
       let score = 0;
+
       for (const term of terms) {
-        score += lower.split(term).length - 1;
+        // Term frequency (count occurrences)
+        const tf = textLower.split(term).length - 1;
+        if (tf === 0) continue;
+
+        // BM25 formula
+        const numerator = tf * (k1 + 1);
+        const denominator = tf + k1 * (1 - b + b * (dl / avgDl));
+        score += idf[term] * (numerator / denominator);
+
+        // Bonus: exact phrase match (all terms adjacent)
+        if (textLower.includes(query.toLowerCase())) {
+          score *= 1.5;
+        }
+
+        // Bonus: term appears in first 200 chars (likely heading/summary)
+        if (textLower.slice(0, 200).includes(term)) {
+          score *= 1.15;
+        }
       }
+
       return { chunk, score };
     })
     .sort((a, b) => b.score - a.score)
     .map((entry) => entry.chunk);
+}
+
+// Keep legacy rankChunks as alias for backward compat
+export function rankChunks(chunks: StoredChunk[], query: string): StoredChunk[] {
+  return bm25Rank(chunks, query);
+}
+
+// ---- PDF Blob Storage ----
+
+export async function savePdfBlob(docId: string, blob: Blob): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("pdfblobs", "readwrite");
+    const store = tx.objectStore("pdfblobs");
+    store.put({ docId, blob });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function loadPdfBlob(docId: string): Promise<Blob | null> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("pdfblobs", "readonly");
+    const store = tx.objectStore("pdfblobs");
+    const req = store.get(docId);
+    req.onsuccess = () => resolve(req.result?.blob ?? null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function deletePdfBlob(docId: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("pdfblobs", "readwrite");
+    const store = tx.objectStore("pdfblobs");
+    store.delete(docId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 export async function getDocChunks(docId: string): Promise<StoredChunk[]> {

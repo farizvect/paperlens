@@ -12,7 +12,8 @@ import {
   listDocuments,
   saveDocument,
   saveChunks,
-
+  savePdfBlob,
+  deletePdfBlob,
   deleteDocument,
   searchChunks,
   type StoredDocument,
@@ -168,6 +169,8 @@ export function Sidebar({ onSettingsClick }: { onSettingsClick?: () => void }) {
         await saveChunks(storedChunks);
       }
 
+      // Save raw PDF blob for viewer
+      await savePdfBlob(docId, file);
 
       await loadDocuments();
       await setActiveDoc(docId, file.name);
@@ -181,6 +184,7 @@ export function Sidebar({ onSettingsClick }: { onSettingsClick?: () => void }) {
   async function handleDeleteDoc(docId: string) {
     try {
       await deleteDocument(docId);
+      await deletePdfBlob(docId).catch(() => {});
       setDocuments((prev) => prev.filter((d) => d.id !== docId));
       if (activeDocId === docId) {
         setActiveDoc(null);

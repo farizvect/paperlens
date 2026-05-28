@@ -16,12 +16,15 @@ import {
   CheckCircle2,
   Quote,
   BookOpen,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import {
   searchChunks,
   getDocChunks,
   saveDocument,
   saveChunks,
+  savePdfBlob,
   saveChatMessages,
   loadChatMessages,
   rankChunks,
@@ -39,7 +42,7 @@ interface Source {
   section?: string;
 }
 
-export function ChatPanel() {
+export function ChatPanel({ onToggleViewer, viewerOpen }: { onToggleViewer?: () => void; viewerOpen?: boolean }) {
   const messages = useChatStore((s) => s.messages);
   const isLoading = useChatStore((s) => s.isLoading);
   const activeDocId = useChatStore((s) => s.activeDocId);
@@ -654,6 +657,9 @@ export function ChatPanel() {
         await saveChunks(storedChunks);
       }
 
+      // Save raw PDF blob for viewer
+      await savePdfBlob(docId, file);
+
       await setActiveDoc(docId, file.name);
       window.dispatchEvent(new CustomEvent("documents-refresh"));
 
@@ -731,6 +737,20 @@ export function ChatPanel() {
             <Menu className="h-5 w-5" />
           </button>
           <h2 className="text-sm font-medium text-[#1B365D]">PaperLens</h2>
+          {onToggleViewer && (
+            <button
+              onClick={onToggleViewer}
+              className={cn(
+                "ml-auto rounded-lg p-1.5 transition-colors",
+                viewerOpen
+                  ? "bg-[#1B365D]/10 text-[#1B365D]"
+                  : "text-[#8a8a82] hover:bg-[#f5f4ed] hover:text-[#2a2a28]"
+              )}
+              title={viewerOpen ? "Close PDF viewer" : "Open PDF viewer"}
+            >
+              {viewerOpen ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+            </button>
+          )}
         </div>
 
         {/* Drag overlay with scale-in animation */}
@@ -805,7 +825,7 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="flex flex-1 flex-row bg-[#f5f4ed] relative">
+    <div className="flex flex-1 h-full flex-row bg-[#f5f4ed] relative">
 
       {/* Chat panel */}
       <div
@@ -905,7 +925,15 @@ export function ChatPanel() {
                     role={msg.role}
                     content={displayContent}
                     sources={parsedSources}
-                    onSourceClick={setSelectedSource}
+                    onSourceClick={(source) => {
+                      setSelectedSource(source);
+                      // Dispatch page event for PDF viewer
+                      if (source.page) {
+                        window.dispatchEvent(
+                          new CustomEvent("source-page-click", { detail: { page: source.page } })
+                        );
+                      }
+                    }}
                     isLoading={isLastAssistantLoading}
                     animationDelay={delay}
                     tokenUsage={msg.tokenUsage}
@@ -1036,6 +1064,20 @@ export function ChatPanel() {
               <Quote className="h-3 w-3" />
               Key Quotes
             </button>
+            {onToggleViewer && (
+              <button
+                onClick={onToggleViewer}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition-colors",
+                  viewerOpen
+                    ? "border-[#1B365D]/30 bg-[#1B365D]/10 text-[#1B365D]"
+                    : "border-[#e0ded6] bg-[#faf9f3] text-[#8a8a82] hover:border-[#1B365D]/30 hover:text-[#1B365D]"
+                )}
+              >
+                {viewerOpen ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                PDF Viewer
+              </button>
+            )}
           </div>
         </div>
 
