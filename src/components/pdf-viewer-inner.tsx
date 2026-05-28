@@ -8,8 +8,8 @@ import { loadPdfBlob } from "@/lib/client/storage";
 import { Loader2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Use local worker (copied from node_modules to public/)
-pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
+// Use local worker (version-pinned, copied from node_modules to public/)
+pdfjs.GlobalWorkerOptions.workerSrc = `/pdfjs-dist@${pdfjs.version}/pdf.worker.min.mjs`;
 
 interface PdfViewerProps {
   docId: string | null;

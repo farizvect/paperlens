@@ -45,4 +45,6 @@ coverage/
 *.pdf
 
 # PDF.js worker (copied from node_modules via postinstall)
-public/pdf.worker.min.mjs
+
+# PDF.js worker (version-pinned, auto-copied via postinstall)
+public/pdfjs-dist@*/
