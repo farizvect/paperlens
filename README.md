@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PDF Research Reader
+
+A client-side PDF research tool. Upload scientific PDFs (theses, journals, reports), ask questions, and get AI-powered answers with source citations.
+
+## Features
+
+- **Multi-PDF chat** — select multiple documents and ask questions across all of them
+- **RAG pipeline** — keyword-based search (FTS5) with first-chunks fallback, no embeddings required
+- **Source citations** — every answer includes clickable `[Source N]` references with chunk excerpts
+- **Client-side storage** — all data lives in IndexedDB (documents, chunks, chat history)
+- **BYOK API** — bring your own OpenAI-compatible API key and base URL via Settings
+- **Language-aware** — AI detects the PDF language and responds in the same language
+- **Mobile-first** — responsive sidebar, hamburger toggle, body scroll lock, bottom sheet source cards
+- **Drag & drop** — drop PDFs anywhere on the chat area
+- **Follow-up suggestions** — AI generates follow-up questions after each response
+- **Key quotes extraction** — one-click extraction of important quotes with citations
+- **Chat history persistence** — conversations saved per document, restored on revisit
+- **Onboarding tutorial** — guided first-use experience
+
+## Stack
+
+- **Next.js 16** (App Router, Turbopack)
+- **React 19** + **TypeScript**
+- **Tailwind CSS v4** + **shadcn/ui**
+- **Zustand** for state management
+- **unpdf** for client-side PDF parsing
+- **react-markdown** + **remark-gfm** for Markdown rendering
+- **IndexedDB** for all client-side storage
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+# Install dependencies
+npm install
+
+# Run dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+
+# Build for production
+npm run build
+npm run start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Dev server runs on `http://localhost:3000` by default.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+src/
+├── app/
+│   ├── api/chat/route.ts    # Streaming SSE chat endpoint
+│   ├── globals.css           # Theme (parchment + ink blue), animations
+│   ├── layout.tsx            # Root layout with Source Serif 4 font
+│   └── page.tsx              # Main page
+├── components/
+│   ├── chat-panel.tsx        # Chat UI, upload, drag-drop, message flow
+│   ├── sidebar.tsx           # Document list, search, upload, multi-select
+│   ├── message-bubble.tsx    # Markdown rendering with source badges
+│   ├── source-card.tsx       # Citation excerpt display
+│   ├── settings-dialog.tsx   # BYOK API configuration
+│   ├── onboarding.tsx        # First-use tutorial
+│   ├── store-hydrator.tsx    # SSR-safe Zustand hydration
+│   ├── loading-skeleton.tsx  # Shimmer loading states
+│   └── ui/                   # shadcn/ui primitives
+├── lib/
+│   ├── client/
+│   │   ├── pdf.ts            # unpdf text extraction
+│   │   └── storage.ts        # IndexedDB (documents, chunks, chats)
+│   ├── rag/
+│   │   └── chunker.ts        # Sentence-boundary chunking (1000 char, 200 overlap)
+│   ├── rate-limit.ts         # Server-side rate limiting
+│   └── utils.ts              # cn() utility
+├── store/
+│   └── chat.ts               # Zustand store (messages, activeDoc, llmSettings)
+```
 
-## Learn More
+## Configuration
 
-To learn more about Next.js, take a look at the following resources:
+### API Settings (BYOK)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Click **Settings** in the sidebar to configure:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Base URL** — any OpenAI-compatible endpoint
+- **API Key** — your API key
+- **Model** — model name (e.g. `gpt-4o-mini`)
 
-## Deploy on Vercel
+Settings are persisted in `localStorage`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Design System
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Canvas**: `#f5f4ed` parchment (never pure white)
+- **Accent**: Ink blue `#1B365D` only
+- **Neutrals**: Warm-toned (yellow-brown undertone)
+- **Typography**: Source Serif 4, weight 400 body / 500 headings
+- **Animations**: Message slide-in, sidebar toggle, drag overlay, shimmer skeletons
+
+## How It Works
+
+1. **Upload** — PDF is parsed client-side with `unpdf`, chunked into ~1000-char segments
+2. **Store** — Chunks saved to IndexedDB with FTS5 full-text search index
+3. **Query** — User question searches chunks by keywords, top 8 results selected
+4. **Stream** — Context + question sent to LLM via `/api/chat` (SSE streaming)
+5. **Display** — Response rendered as Markdown with `[Source N]` citation badges
+
+## License
+
+MIT
