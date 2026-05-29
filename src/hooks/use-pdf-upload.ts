@@ -5,6 +5,7 @@ import { saveDocument, saveChunks, savePdfBlob } from "@/lib/client/storage";
 import type { StoredDocument, StoredChunk } from "@/lib/client/storage";
 import { parsePDFFile } from "@/lib/client/pdf";
 import { chunkText } from "@/lib/rag/chunker";
+import { findTextItemRangeForChunk } from "@/lib/rag/highlight-anchors";
 import { useChatStore } from "@/store/chat";
 
 /**
@@ -25,7 +26,7 @@ export function usePdfUpload() {
     setUploadError(null);
     setUploadSuccess(false);
     try {
-      const { pages, numPages } = await parsePDFFile(file);
+      const { pages, pageItems, numPages } = await parsePDFFile(file);
       const chunks = chunkText(pages);
       const docId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
@@ -47,6 +48,7 @@ export function usePdfUpload() {
           text: chunk.text,
           page: chunk.page,
           section: chunk.section,
+          highlightRange: findTextItemRangeForChunk(chunk, pageItems),
         }));
         await saveChunks(storedChunks);
       }

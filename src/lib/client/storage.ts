@@ -11,6 +11,12 @@ export interface StoredDocument {
   createdAt: number;
 }
 
+export interface StoredChunkHighlightRange {
+  page: number;
+  start: number;
+  end: number;
+}
+
 export interface StoredChunk {
   id: string;
   docId: string;
@@ -20,6 +26,7 @@ export interface StoredChunk {
   page?: number;
   section?: string;
   embedding?: number[];
+  highlightRange?: StoredChunkHighlightRange;
 }
 
 export interface StoredChatMessage {

@@ -19,16 +19,19 @@ export default function Home() {
   const [viewerOpen, setViewerOpen] = React.useState(false);
   const [scrollToPage, setScrollToPage] = React.useState<number | null>(null);
   const [highlightText, setHighlightText] = React.useState<string | null>(null);
+  const [highlightRange, setHighlightRange] = React.useState<{ page: number; start: number; end: number } | null>(null);
 
   // Listen for source-page-click events from ChatPanel
   React.useEffect(() => {
     function handleSourceClick(e: CustomEvent) {
       const page = e.detail?.page;
       const text = e.detail?.text;
+      const range = e.detail?.highlightRange;
       if (page && typeof page === "number") {
         setViewerOpen(true);
         setScrollToPage(page);
         if (text) setHighlightText(text);
+        setHighlightRange(range && typeof range.start === "number" && typeof range.end === "number" ? range : null);
         // Reset after a tick so the PdfViewer picks it up
         setTimeout(() => setScrollToPage(null), 500);
       }
@@ -65,6 +68,7 @@ export default function Home() {
                   docId={activeDocId}
                   scrollToPage={scrollToPage}
                   highlightText={highlightText}
+                  highlightRange={highlightRange}
                   onClose={() => setViewerOpen(false)}
                   className="flex-1"
                 />
@@ -85,13 +89,14 @@ export default function Home() {
         </div>
 
         {/* Mobile layout */}
-        <div className="flex md:hidden min-w-0" style={{ gridColumn: "1 / -1" }}>
+        <div className="flex md:hidden min-w-0 min-h-0 h-full" style={{ gridColumn: "1 / -1" }}>
           {viewerOpen ? (
             <div className="fixed inset-0 z-30 flex flex-col bg-[#f0efe8]">
               <PdfViewer
                 docId={activeDocId}
                 scrollToPage={scrollToPage}
                 highlightText={highlightText}
+                highlightRange={highlightRange}
                 onClose={() => setViewerOpen(false)}
                 className="flex-1"
               />

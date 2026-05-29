@@ -13,6 +13,7 @@ interface Source {
   chunkIndex: number;
   page?: number;
   section?: string;
+  highlightRange?: { page: number; start: number; end: number };
 }
 
 interface ChatMessagesProps {
@@ -101,7 +102,7 @@ export function ChatMessages({
                     // Dispatch page event for PDF viewer with chunk text for highlighting
                     if (source.page) {
                       window.dispatchEvent(
-                        new CustomEvent("source-page-click", { detail: { page: source.page, text: source.text } })
+                        new CustomEvent("source-page-click", { detail: { page: source.page, text: source.text, highlightRange: source.highlightRange } })
                       );
                     }
                   }}

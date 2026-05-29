@@ -11,6 +11,7 @@ interface Source {
   chunkIndex: number;
   page?: number;
   section?: string;
+  highlightRange?: { page: number; start: number; end: number };
 }
 
 interface TokenUsage {
@@ -38,8 +39,8 @@ function parseSourceReferences(
   text: string
 ): Array<{ type: "text" | "source"; value: string; index?: number }> {
   const parts: Array<{ type: "text" | "source"; value: string; index?: number }> = [];
-  // Match [Source N] or [Source N, M] or [Source N, Source M] etc.
-  const regex = /\[Source\s+(\d+(?:\s*,\s*(?:Source\s+)?\d+)*(?:\s*,\s*chunk\s+\d+)?)\]/gi;
+  // Match [Source N] or [Source N, M] or [Source N, Source M] or [Source N, p.52] etc.
+  const regex = /\[Source\s+(\d+(?:\s*,\s*(?:Source\s+)?\d+)*(?:\s*,\s*(?:chunk|p\.?)\s*\d+)?)\]/gi;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -51,8 +52,8 @@ function parseSourceReferences(
     const fullMatch = match[0];
     const numbersStr = match[1];
     // Extract all numbers from the match
-    // Extract source numbers (skip "chunk N" if present)
-    const cleanStr = numbersStr.replace(/,\s*chunk\s+\d+/i, "");
+    // Extract source numbers (skip "chunk N" and "p.N" if present)
+    const cleanStr = numbersStr.replace(/,\s*(?:chunk|p\.?)\s*\d+/gi, "");
     const indices = Array.from(cleanStr.matchAll(/\d+/g)).map(m => parseInt(m[0], 10) - 1);
 
     // If multiple sources, create one badge per source
@@ -257,7 +258,7 @@ export function MessageBubble({ role, content, sources, onSourceClick, isLoading
 
   return (
     <div className={`flex w-full justify-start ${animClass}`} style={delayStyle}>
-      <div className="max-w-full md:max-w-[85%] rounded-xl px-4 py-3 text-base md:text-sm leading-relaxed bg-[#faf9f3] text-[#2a2a28] shadow-[0_0_0_1px_rgba(0,0,0,0.05)] break-words overflow-x-hidden">
+      <div className="max-w-full md:max-w-[85%] rounded-xl px-4 py-3 text-base md:text-sm leading-relaxed bg-[#faf9f3] text-[#2a2a28] shadow-[0_0_0_1px_rgba(0,0,0,0.05)] break-words">
         {isLoading && !content ? (
           <ThinkingShimmer />
         ) : (
@@ -290,9 +291,11 @@ export function MessageBubble({ role, content, sources, onSourceClick, isLoading
                     );
                   }
                   return (
-                    <code className="block rounded-lg bg-[#2a2a28] p-3 text-xs font-mono text-[#e8e6de] overflow-x-auto">
-                      {children}
-                    </code>
+                    <div className="my-3 overflow-x-auto overflow-y-hidden rounded-lg bg-[#2a2a28]" style={{ touchAction: "pan-x", WebkitOverflowScrolling: "touch" }}>
+                      <code className="block p-3 text-xs font-mono text-[#e8e6de] whitespace-pre">
+                        {children}
+                      </code>
+                    </div>
                   );
                 },
                 a: ({ children, href }) => (

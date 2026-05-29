@@ -18,6 +18,7 @@ interface PdfViewerProps {
   docId: string | null;
   scrollToPage?: number | null;
   highlightText?: string | null;
+  highlightRange?: { page: number; start: number; end: number } | null;
   onClose?: () => void;
   className?: string;
 }

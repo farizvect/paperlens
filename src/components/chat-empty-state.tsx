@@ -49,7 +49,7 @@ export function ChatEmptyState({
 }: ChatEmptyStateProps) {
   return (
     <div
-      className="flex flex-1 flex-col bg-[#f5f4ed] relative"
+      className="flex h-full min-h-0 flex-1 flex-col bg-[#f5f4ed] relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

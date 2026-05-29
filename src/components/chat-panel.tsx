@@ -148,7 +148,7 @@ export function ChatPanel({ onToggleViewer, viewerOpen, onToggleSidebar, sidebar
   }
 
   function handleKeyQuotes() {
-    sendMessage("Extract the most important direct quotes and citations from this document. Format as a numbered list with the exact quote and page/section reference.");
+    sendMessage("Extract the most important direct quotes and citations from this document.");
   }
 
   function handleSummarize() {

@@ -128,6 +128,7 @@ export function useChatStreaming({
         text: r.text,
         page: r.page,
         section: r.section,
+        highlightRange: r.highlightRange,
       }));
 
       const currentMessages = useChatStore.getState().messages;

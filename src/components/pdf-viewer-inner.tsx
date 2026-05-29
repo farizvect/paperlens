@@ -15,6 +15,7 @@ interface PdfViewerProps {
   docId: string | null;
   scrollToPage?: number | null;
   highlightText?: string | null;
+  highlightRange?: { page: number; start: number; end: number } | null;
   onClose?: () => void;
   className?: string;
 }
@@ -25,15 +26,17 @@ function norm(s: string): string {
 }
 
 // Highlight a range of characters in the PDF text layer
-function highlightRange(
+function drawHighlightRange(
   spanRanges: { span: Element; start: number; end: number }[],
   matchStart: number,
   matchEnd: number,
   textLayer: Element
-) {
+): number {
+  let count = 0;
   for (const sr of spanRanges) {
     if (sr.end > matchStart && sr.start < matchEnd) {
       const rect = sr.span.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
       const layerRect = textLayer.getBoundingClientRect();
       const highlight = document.createElement("div");
       highlight.className = "pdf-source-highlight";
@@ -50,12 +53,26 @@ function highlightRange(
         animation: pdf-highlight-fade-in 0.3s ease-out;
       `;
       textLayer.appendChild(highlight);
+      count += 1;
     }
     if (sr.start > matchEnd) break;
   }
+  return count;
+}
+function highlightTextItemRange(textLayer: Element, range: { start: number; end: number }): boolean {
+  const spans = Array.from(textLayer.querySelectorAll("span"));
+  if (spans.length === 0) return false;
+
+  const start = Math.max(0, Math.min(range.start, spans.length - 1));
+  const end = Math.max(start + 1, Math.min(range.end, spans.length));
+  const spanRanges: { span: Element; start: number; end: number }[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    spanRanges.push({ span: spans[i], start: i, end: i + 1 });
+  }
+  return drawHighlightRange(spanRanges, start, end, textLayer) > 0;
 }
 
-export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, className }: PdfViewerProps) {
+export function PdfViewerInner({ docId, scrollToPage, highlightText, highlightRange, onClose, className }: PdfViewerProps) {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null);
   const [numPages, setNumPages] = React.useState(0);
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -199,15 +216,12 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, cl
     }
   }
 
-  // Highlight text in PDF text layer when highlightText changes
+  // Highlight text in PDF text layer when source changes
   React.useEffect(() => {
-    if (!highlightText) return;
+    if (!highlightText && !highlightRange) return;
 
     // Wait for text layer to render (react-pdf renders async)
     const timer = setTimeout(() => {
-      // Remove previous highlights
-      document.querySelectorAll(".pdf-source-highlight").forEach((el) => el.remove());
-
       // Only search the CURRENT page's text layer to avoid false matches
       const currentPageEl = pageRefs.current.get(currentPage);
       if (!currentPageEl) return;
@@ -216,6 +230,13 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, cl
 
       const spans = Array.from(textLayer.querySelectorAll("span"));
       if (spans.length === 0) return;
+
+      if (highlightRange && highlightRange.page === currentPage) {
+        if (highlightTextItemRange(textLayer, highlightRange)) return;
+      }
+
+      if (!highlightText) return;
+      const searchText: string = highlightText;
 
       // Build full text with single space between spans, track exact positions
       const spanRanges: { span: Element; start: number; end: number }[] = [];
@@ -230,7 +251,7 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, cl
       const nFullText = norm(fullText);
 
       // Use the full highlight text as one continuous search string
-      const searchStr = norm(highlightText);
+      const searchStr = norm(searchText);
       if (searchStr.length < 3) return;
 
       // Try multiple match strategies in order of specificity
@@ -238,7 +259,7 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, cl
 
       let idx = tryMatch(searchStr);
       if (idx !== -1) {
-        highlightRange(spanRanges, idx, idx + searchStr.length, textLayer);
+        drawHighlightRange(spanRanges, idx, idx + searchStr.length, textLayer);
         return;
       }
 
@@ -251,7 +272,7 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, cl
       for (const chunk of chunks) {
         const altIdx = tryMatch(chunk);
         if (altIdx !== -1) {
-          highlightRange(spanRanges, altIdx, altIdx + chunk.length, textLayer);
+          drawHighlightRange(spanRanges, altIdx, altIdx + chunk.length, textLayer);
           return;
         }
       }
@@ -264,16 +285,16 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, cl
             const phrase = words.slice(start, start + len).join(" ");
             const wIdx = tryMatch(phrase);
             if (wIdx !== -1) {
-              highlightRange(spanRanges, wIdx, wIdx + phrase.length, textLayer);
+              drawHighlightRange(spanRanges, wIdx, wIdx + phrase.length, textLayer);
               return;
             }
           }
         }
       }
-    }, 1200); // longer timeout for page text layer to render
+    }, 2000); // wait for react-pdf text layer layout to settle before reading span rects
 
     return () => clearTimeout(timer);
-  }, [highlightText, currentPage]);
+  }, [highlightText, highlightRange, currentPage]);
 
   function onDocumentLoadSuccess({ numPages: n }: { numPages: number }) {
     setNumPages(n);
@@ -458,7 +479,7 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, cl
                 <Page
                   pageNumber={pageNum}
                   scale={scale}
-                  renderTextLayer={!isMobile || textSelectMode}
+                  renderTextLayer={!isMobile || textSelectMode || Boolean(highlightRange)}
                   renderAnnotationLayer={true}
                   className="shadow-[0_0_0_1px_rgba(0,0,0,0.05)]"
                 />

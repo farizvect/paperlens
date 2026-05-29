@@ -30,6 +30,22 @@ test("sidebar is visible on desktop", async ({ page }) => {
   await expect(page.locator("h1:has-text('PaperLens')")).toBeVisible();
 });
 
+test("empty upload prompt is vertically centered", async ({ page }) => {
+  await page.goto("/");
+  await dismissOverlays(page);
+  const prompt = page.locator(".hidden.md\\:block h2:has-text('Upload a PDF to get started')").first();
+  await expect(prompt).toBeVisible();
+
+  const box = await prompt.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+
+  const promptCenterY = box!.y + box!.height / 2;
+  const viewportCenterY = viewport!.height / 2;
+  expect(Math.abs(promptCenterY - viewportCenterY)).toBeLessThan(80);
+});
+
 test("no right-side gap when PDF viewer is open", async ({ page }) => {
   await page.goto("/");
   await dismissOverlays(page);

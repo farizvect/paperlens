@@ -42,3 +42,25 @@ test("PDF viewer virtualizes pages", async ({ page }) => {
   const desktopPages = await page.locator(".hidden.md\\:block .react-pdf__Page").count();
   expect(desktopPages).toBeLessThanOrEqual(5);
 });
+
+test("PDF source click uses stored text-item range for highlighting", async ({ page }) => {
+  await page.goto("/");
+  await dismissOverlays(page);
+  await page.locator("input[type=file]").first().setInputFiles("public/test_ml.pdf");
+  await expect(page.locator("text=test_ml.pdf").first()).toBeVisible({ timeout: 10000 });
+  await dismissOverlays(page);
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("source-page-click", {
+      detail: {
+        page: 1,
+        text: "fallback text that should not be needed when highlightRange exists",
+        highlightRange: { page: 1, start: 4, end: 6 },
+      },
+    }));
+  });
+
+  await expect(page.locator(".react-pdf__Page").first()).toBeVisible({ timeout: 15000 });
+  await expect(page.locator(".pdf-source-highlight").first()).toBeVisible({ timeout: 10000 });
+  await expect(page.locator(".pdf-source-highlight")).toHaveCount(2);
+});

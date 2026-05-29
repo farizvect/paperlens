@@ -2,8 +2,13 @@
 
 import type { Chunk } from "@/lib/rag/chunker";
 
+export interface ParsedPDFTextItem {
+  text: string;
+}
+
 export interface ParsedPDF {
   pages: string[];
+  pageItems: ParsedPDFTextItem[][];
   numPages: number;
 }
 
@@ -15,18 +20,22 @@ export async function parsePDFFile(file: File): Promise<ParsedPDF> {
   const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
   const pdf = await loadingTask.promise;
   const pages: string[] = [];
+  const pageItems: ParsedPDFTextItem[][] = [];
 
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item) => ("str" in item ? item.str : ""))
-      .join(" ");
+    const items = textContent.items
+      .map((item) => ({ text: "str" in item ? item.str : "" }))
+      .filter((item) => item.text.trim().length > 0);
+    const pageText = items.map((item) => item.text).join(" ");
     pages.push(pageText);
+    pageItems.push(items);
   }
 
   return {
     pages,
+    pageItems,
     numPages: pdf.numPages,
   };
 }
