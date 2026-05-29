@@ -7,10 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "mkdir -p public/pdfjs-dist@$(node -e \"console.log(require('pdfjs-dist/package.json').version)\") && cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdfjs-dist@$(node -e \"console.log(require('pdfjs-dist/package.json').version)\")/pdf.worker.min.mjs && sed -i \"s|pdfjs.GlobalWorkerOptions.workerSrc = 'pdf.worker.mjs';|// pdfjs.GlobalWorkerOptions.workerSrc patched — see pdf-viewer-inner.tsx|\" node_modules/react-pdf/dist/index.js"
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "postinstall": "mkdir -p public/pdfjs-dist@$(node -e \\\"console.log(require('pdfjs-dist/package.json').version)\\\") && cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdfjs-dist@$(node -e \\\"console.log(require('pdfjs-dist/package.json').version)\\\")/pdf.worker.min.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
+    "@huggingface/transformers": "^4.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
@@ -28,6 +31,7 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

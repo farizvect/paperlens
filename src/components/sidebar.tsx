@@ -6,7 +6,7 @@ import { useChatStore } from "@/store/chat";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Search, Trash2, X, Loader2, Settings, Check, Square, CheckSquare } from "lucide-react";
+import { FileText, Search, Trash2, X, Loader2, Settings, Square, CheckSquare } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   listDocuments,

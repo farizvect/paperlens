@@ -15,7 +15,7 @@ interface ResizableSplitProps {
   storageKey?: string;       // localStorage key for persistence
 }
 
-const GUTTER = 5; // px
+const GUTTER = 8; // px
 
 function loadRatio(storageKey: string, defaultRatio: number): number {
   if (typeof window === "undefined") return defaultRatio;
@@ -45,19 +45,30 @@ export function ResizableSplit({
   const ratioRef = React.useRef(loadRatio(storageKey, defaultRatio));
   const [leftWidth, setLeftWidth] = React.useState<number | null>(null);
 
-  // Measure container once on mount and set initial pixel width
+  // Measure container on mount/resize and set pixel width from current ratio
   React.useEffect(() => {
     if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const avail = rect.width - GUTTER;
-    const initial = avail * ratioRef.current;
-    setLeftWidth(Math.max(minLeftPx, Math.min(avail - minRightPx, initial)));
-  }, [minLeftPx, minRightPx]); // runs once since deps are stable
+    const container = containerRef.current;
+
+    function applyMeasuredWidth() {
+      const rect = container.getBoundingClientRect();
+      const avail = rect.width - GUTTER;
+      if (avail <= 0) return;
+      const initial = avail * ratioRef.current;
+      setLeftWidth(Math.max(minLeftPx, Math.min(avail - minRightPx, initial)));
+    }
+
+    applyMeasuredWidth();
+    const ro = new ResizeObserver(applyMeasuredWidth);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [minLeftPx, minRightPx]);
 
   // Persist ratio
   React.useEffect(() => {
     if (!containerRef.current || leftWidth === null) return;
     const ratio = leftWidth / (containerRef.current.getBoundingClientRect().width - GUTTER);
+    ratioRef.current = ratio;
     try {
       localStorage.setItem(storageKey, ratio.toFixed(3));
     } catch {}
@@ -89,7 +100,7 @@ export function ResizableSplit({
   return (
     <div
       ref={containerRef}
-      className="flex flex-row h-full min-w-0 select-none"
+      className="flex flex-row h-full w-full min-w-0"
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerLeave={onPointerUp}
@@ -105,7 +116,7 @@ export function ResizableSplit({
       {/* Gutter / drag handle */}
       <div
         className={cn(
-          "relative shrink-0 cursor-col-resize hover:w-[7px] active:w-[7px] transition-[width] duration-75 group",
+          "relative shrink-0 cursor-col-resize hover:w-[7px] active:w-[7px] transition-[width] duration-75 group select-none",
           "bg-[#e0ded6] hover:bg-[#1B365D]/20 active:bg-[#1B365D]/30",
           gutterClassName
         )}
@@ -120,9 +131,9 @@ export function ResizableSplit({
         </div>
       </div>
 
-      {/* Right pane — flex-1 fills remaining space exactly, no overflow-hidden so content scrolls */}
+      {/* Right pane — flex-1 fills remaining space exactly */}
       <div
-        className={cn("flex flex-col h-full w-full", rightClassName)}
+        className={cn("flex flex-col h-full w-full overflow-hidden", rightClassName)}
         style={{ flex: "1 1 0", minWidth: `${minRightPx}px` }}
       >
         {right}

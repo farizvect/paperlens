@@ -3,7 +3,6 @@
 import * as React from "react";
 import dynamic from "next/dynamic";
 import { Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 // Dynamically import PdfViewer with SSR disabled (react-pdf needs browser APIs)
 const PdfViewerInner = dynamic(() => import("@/components/pdf-viewer-inner").then(m => m.PdfViewerInner), {

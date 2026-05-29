@@ -8,8 +8,6 @@ import { PdfViewer } from "@/components/pdf-viewer";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Onboarding } from "@/components/onboarding";
 import { ResizableSplit } from "@/components/resizable-split";
-import { FileText, X } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 export default function Home() {
   const sidebarOpen = useChatStore((s) => s.sidebarOpen);
@@ -40,37 +38,18 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-[#f5f4ed]">
-      {/* Desktop sidebar — collapsible with animation */}
+    <>
       <div
-        className={cn(
-          "hidden md:flex overflow-hidden transition-all duration-300 ease-in-out shrink-0",
-          sidebarCollapsed ? "w-0 opacity-0" : "w-72 opacity-100"
-        )}
+        className="grid h-dvh w-full overflow-hidden bg-[#f5f4ed]"
+        style={{ gridTemplateColumns: sidebarCollapsed ? "0px 1fr" : "288px 1fr" }}
       >
-        <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
-      </div>
-
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        >
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
-          <div
-            className="absolute inset-y-0 left-0 w-72 max-w-[80vw]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
-          </div>
+        {/* Desktop sidebar */}
+        <div className="hidden md:block overflow-hidden">
+          <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
         </div>
-      )}
 
-      {/* Main content area */}
-      <div className="flex flex-1 h-full min-w-0">
-        {/* Desktop layout */}
-        <div className="hidden md:flex flex-1 h-full min-w-0">
+        {/* Desktop content */}
+        <div className="hidden md:block min-w-0 min-h-0 overflow-hidden">
           {viewerOpen ? (
             <ResizableSplit
               left={
@@ -90,7 +69,7 @@ export default function Home() {
                   className="flex-1"
                 />
               }
-              defaultRatio={0.65}
+              defaultRatio={0.50}
               minLeftPx={320}
               minRightPx={320}
               storageKey="paperlens-split-ratio"
@@ -106,7 +85,7 @@ export default function Home() {
         </div>
 
         {/* Mobile layout */}
-        <div className="flex md:hidden flex-1 min-w-0">
+        <div className="flex md:hidden min-w-0" style={{ gridColumn: "1 / -1" }}>
           {viewerOpen ? (
             <div className="fixed inset-0 z-30 flex flex-col bg-[#f0efe8]">
               <PdfViewer
@@ -128,11 +107,27 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        >
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+          <div
+            className="absolute inset-y-0 left-0 w-72 max-w-[80vw]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
+          </div>
+        </div>
+      )}
+
       {/* Settings dialog */}
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {/* Onboarding — first-time tutorial */}
       <Onboarding />
-    </div>
+    </>
   );
 }

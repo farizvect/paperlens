@@ -19,6 +19,7 @@ export interface StoredChunk {
   text: string;
   page?: number;
   section?: string;
+  embedding?: number[];
 }
 
 export interface StoredChatMessage {
@@ -309,6 +310,102 @@ export function rankChunks(chunks: StoredChunk[], query: string): StoredChunk[] 
   return bm25Rank(chunks, query);
 }
 
+// ---- BM25 Score Map (for hybrid search) ----
+
+/**
+ * Return BM25 scores as a Map of chunk id -> raw score.
+ * Unlike bm25Rank which returns sorted chunks, this preserves
+ * the score map so hybrid search can combine with semantic scores.
+ */
+export function bm25ScoreMap(chunks: StoredChunk[], query: string): Map<string, number> {
+  const terms = tokenize(query);
+  const scores = new Map<string, number>();
+  if (terms.length === 0) return scores;
+
+  const k1 = 1.5;
+  const b = 0.75;
+  const avgDl = chunks.reduce((sum, c) => sum + c.text.split(/\s+/).length, 0) / (chunks.length || 1);
+  const N = chunks.length;
+
+  const idf: Record<string, number> = {};
+  for (const term of terms) {
+    const docsWithTerm = chunks.filter((c) => c.text.toLowerCase().includes(term)).length;
+    idf[term] = Math.log((N - docsWithTerm + 0.5) / (docsWithTerm + 0.5) + 1);
+  }
+
+  for (const chunk of chunks) {
+    const textLower = chunk.text.toLowerCase();
+    const dl = chunk.text.split(/\s+/).length;
+    let score = 0;
+
+    for (const term of terms) {
+      const tf = textLower.split(term).length - 1;
+      if (tf === 0) continue;
+      const numerator = tf * (k1 + 1);
+      const denominator = tf + k1 * (1 - b + b * (dl / avgDl));
+      score += idf[term] * (numerator / denominator);
+
+      if (textLower.includes(query.toLowerCase())) {
+        score *= 1.5;
+      }
+      if (textLower.slice(0, 200).includes(term)) {
+        score *= 1.15;
+      }
+    }
+
+    scores.set(chunk.id, score);
+  }
+
+  return scores;
+}
+
+// ---- Embedding Storage ----
+
+/**
+ * Save embeddings for existing chunks. Updates each chunk's `embedding` field in IndexedDB.
+ */
+export async function saveChunkEmbeddings(
+  docId: string,
+  embeddings: Map<string, number[]>
+): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("chunks", "readwrite");
+    const idx = tx.objectStore("chunks").index("docId");
+    const req = idx.openCursor(IDBKeyRange.only(docId));
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor) {
+        const emb = embeddings.get(cursor.value.id);
+        if (emb) {
+          cursor.update({ ...cursor.value, embedding: emb });
+        }
+        cursor.continue();
+      }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/**
+ * Check whether chunks for a document already have embeddings.
+ * Returns the chunks that have embeddings, or empty array if none.
+ */
+export async function getChunksWithEmbeddings(docId: string): Promise<StoredChunk[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("chunks", "readonly");
+    const idx = tx.objectStore("chunks").index("docId");
+    const req = idx.getAll(IDBKeyRange.only(docId));
+    req.onsuccess = () => {
+      const chunks = req.result as StoredChunk[];
+      resolve(chunks.filter((c) => c.embedding && c.embedding.length > 0));
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
 // ---- PDF Blob Storage ----
 
 export async function savePdfBlob(docId: string, blob: Blob): Promise<void> {
@@ -408,7 +505,7 @@ export async function loadChatMessages(
     const req = idx.getAll(IDBKeyRange.only(docId));
     req.onsuccess = () => {
       const results = req.result
-        .sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0))
+        .sort((a: StoredChatMessage, b: StoredChatMessage) => (a.order ?? 0) - (b.order ?? 0))
         .map((r: StoredChatMessage) => ({
           id: r.id,
           role: r.role,

@@ -8,7 +8,7 @@ import { ChevronDown, ChevronUp, FileText } from "lucide-react";
 
 interface SourceCardProps {
   docName: string;
-  chunkIndex: number;
+  chunkIndex?: number;
   text: string;
   page?: number;
   section?: string;
@@ -20,10 +20,9 @@ interface SourceCardProps {
   onDismiss?: () => void;
 }
 
-export function SourceCard({ docName, chunkIndex, text, page, section, onClick, className, isBottomSheet, onDismiss }: SourceCardProps) {
+export function SourceCard({ docName, text, page, section, onClick, className, isBottomSheet, onDismiss }: SourceCardProps) {
   const [expanded, setExpanded] = React.useState(false);
   const isLong = text.length > 200;
-  const displayText = expanded || !isLong ? text : text.slice(0, 200) + "…";
 
   const content = (
     <>

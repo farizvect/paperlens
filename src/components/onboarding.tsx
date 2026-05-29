@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils";
 import {
   Upload,
   MessageSquare,
-  Layers,
   Quote,
   ChevronRight,
   ChevronLeft,

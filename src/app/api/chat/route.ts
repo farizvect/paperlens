@@ -281,7 +281,6 @@ After your complete answer, suggest 2-3 relevant follow-up questions the user mi
           // No closing tag but has JSON array: <suggestions>["...", "..."]
           /<(?:suggestions|follow_up_questions|follow-up-questions)>\s*(\[[\s\S]*\])\s*$/,
         ];
-        let suggestionsParsed = false;
         for (const pattern of suggestionPatterns) {
           const match = accumulatedContent.match(pattern);
           if (match) {
@@ -293,7 +292,6 @@ After your complete answer, suggest 2-3 relevant follow-up questions the user mi
                     `data: ${JSON.stringify({ type: "suggestions", suggestions })}\n\n`
                   )
                 );
-                suggestionsParsed = true;
                 break;
               }
             } catch {
@@ -315,7 +313,6 @@ After your complete answer, suggest 2-3 relevant follow-up questions the user mi
                       `data: ${JSON.stringify({ type: "suggestions", suggestions })}\n\n`
                     )
                   );
-                  suggestionsParsed = true;
                   break;
                 }
               } catch {
