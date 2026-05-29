@@ -9,12 +9,14 @@
 - **Multi-PDF chat** — select multiple documents and ask questions across all of them
 - **Hybrid search** — BM25 keyword search combined with semantic embeddings (`@huggingface/transformers`) for better retrieval
 - **Source citations** — every answer includes clickable `[Source N]` references with chunk excerpts
+- **Coordinate-based highlighting** — PDF text items extracted at upload time with position data; source clicks jump to exact location using text-item anchors (not fuzzy search)
 - **Client-side storage** — all data lives in IndexedDB (documents, chunks, chat history)
 - **PDF viewer** — built-in viewer with zoom, page navigation, virtualized rendering (currentPage ± 2), and source highlighting
 - **Mobile text selection** — text layer disabled on mobile by default (saves memory), toggle via toolbar
+- **Mobile-first** — responsive sidebar, hamburger toggle, body scroll lock, CSS grid layout, horizontal-swipe code blocks
 - **BYOK API** — bring your own OpenAI-compatible API key and base URL via Settings
 - **Language-aware** — AI detects the PDF language and responds in the same language
-- **Mobile-first** — responsive sidebar, hamburger toggle, body scroll lock, CSS grid layout
+- **Anti-jailbreak** — system prompt scoped to document analysis only; blocks roleplay, instruction injection, and prompt exfiltration
 - **Drag & drop** — drop PDFs anywhere on the chat area
 - **Follow-up suggestions** — AI generates follow-up questions after each response
 - **Key quotes extraction** — one-click extraction of important quotes with citations
@@ -121,14 +123,15 @@ src/
 │   ├── loading-skeleton.tsx  # Shimmer loading states
 │   └── ui/                   # shadcn/ui primitives
 ├── hooks/
-│   └── use-chat.ts           # Chat message management hook
+│   └── use-chat-streaming.ts # Chat streaming + source handling
 ├── lib/
 │   ├── client/
-│   │   ├── pdf.ts            # unpdf text extraction
+│   │   ├── pdf.ts            # unpdf text extraction + pdf.js text items
 │   │   └── storage.ts        # IndexedDB (documents, chunks, chats)
 │   ├── rag/
 │   │   ├── chunker.ts        # Sentence-boundary chunking (1000 char, 200 overlap)
-│   │   └── embeddings.ts     # @huggingface/transformers embeddings
+│   │   ├── embeddings.ts     # @huggingface/transformers embeddings
+│   │   └── highlight-anchors.ts  # Text-item position extraction for PDF highlighting
 │   ├── search/
 │   │   └── hybrid.ts         # BM25 + semantic hybrid search
 │   ├── rate-limit.ts         # Server-side rate limiting
@@ -138,7 +141,8 @@ src/
 tests/
 ├── layout.spec.ts            # Layout integrity tests
 ├── upload.spec.ts            # PDF upload tests
-└── pdf-viewer.spec.ts        # PDF viewer and virtualization tests
+├── pdf-viewer.spec.ts        # PDF viewer and virtualization tests
+└── highlight-anchors.spec.ts # Highlight anchor extraction tests
 ```
 
 ## Configuration
@@ -163,13 +167,21 @@ Settings are persisted in `localStorage`.
 
 ## How It Works
 
-1. **Upload** — PDF is parsed client-side with `unpdf`, chunked into ~1000-char segments with section awareness
-2. **Embed** — Chunks embedded with `@huggingface/transformers` for semantic search
-3. **Store** — Chunks + embeddings saved to IndexedDB with full-text search index
-4. **Query** — User question runs hybrid search (BM25 + semantic), top 8 results selected
-5. **Stream** — Context + question sent to LLM via `/api/chat` (SSE streaming)
-6. **Display** — Response rendered as Markdown with `[Source N]` citation badges
-7. **Highlight** — Click `[Source N]` to open PDF viewer and highlight the source text
+1. **Upload** — PDF is parsed client-side with `unpdf`; pdf.js text items extracted with position data for coordinate-based highlighting
+2. **Chunk** — Text chunked into ~1000-char segments with section awareness; each chunk stores `highlightRange` (page, start, end text-item indices)
+3. **Embed** — Chunks embedded with `@huggingface/transformers` for semantic search
+4. **Store** — Chunks + embeddings saved to IndexedDB with full-text search index
+5. **Query** — User question runs hybrid search (BM25 + semantic), top 8 results selected
+6. **Stream** — Context + question sent to LLM via `/api/chat` (SSE streaming)
+7. **Display** — Response rendered as Markdown with `[Source N]` citation badges
+8. **Highlight** — Click `[Source N]` to open PDF viewer; highlights drawn using stored text-item coordinates (falls back to fuzzy search for legacy docs)
+
+## Security
+
+- **Anti-jailbreak system prompt** — scoped to document analysis; blocks roleplay, instruction injection, and prompt exfiltration
+- **PDF context as reference only** — instructions embedded in uploaded documents are not executed
+- **Rate limiting** — server-side IP-based rate limiting on chat endpoint
+- **SSRF protection** — base URL validation blocks private/internal IPs
 
 ## Privacy
 
