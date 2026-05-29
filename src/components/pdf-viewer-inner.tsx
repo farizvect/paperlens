@@ -43,7 +43,7 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, cl
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null);
   const [numPages, setNumPages] = React.useState(0);
   const [currentPage, setCurrentPage] = React.useState(1);
-  const [scale, setScale] = React.useState(1.0);
+  const [scale, setScale] = React.useState(1.3);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -210,8 +210,8 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, onClose, cl
 
   return (
     <div className={cn("flex flex-col bg-[#f0efe8]", className)}>
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-2 border-b border-[#e0ded6] bg-[#faf9f3] px-3 py-1.5">
+      {/* Toolbar — sticky top, always visible */}
+      <div className="flex items-center justify-between gap-2 border-b border-[#e0ded6] bg-[#faf9f3] px-3 py-1.5 sticky top-0 z-10 shrink-0">
         <div className="flex items-center gap-1">
           <button
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}

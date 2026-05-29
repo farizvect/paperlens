@@ -120,9 +120,9 @@ export function ResizableSplit({
         </div>
       </div>
 
-      {/* Right pane — flex-1 fills remaining space exactly */}
+      {/* Right pane — flex-1 fills remaining space exactly, no overflow-hidden so content scrolls */}
       <div
-        className={cn("flex flex-col h-full overflow-hidden", rightClassName)}
+        className={cn("flex flex-col h-full w-full", rightClassName)}
         style={{ flex: "1 1 0", minWidth: `${minRightPx}px` }}
       >
         {right}

@@ -70,7 +70,7 @@ export default function Home() {
       {/* Main content area */}
       <div className="flex flex-1 h-full min-w-0">
         {/* Desktop layout */}
-        <div className="hidden md:flex flex-1 min-w-0">
+        <div className="hidden md:flex flex-1 h-full min-w-0">
           {viewerOpen ? (
             <ResizableSplit
               left={
@@ -90,7 +90,7 @@ export default function Home() {
                   className="flex-1"
                 />
               }
-              defaultRatio={0.55}
+              defaultRatio={0.65}
               minLeftPx={320}
               minRightPx={320}
               storageKey="paperlens-split-ratio"
