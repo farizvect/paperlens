@@ -7,6 +7,7 @@ import { ChatPanel } from "@/components/chat-panel";
 import { PdfViewer } from "@/components/pdf-viewer";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Onboarding } from "@/components/onboarding";
+import { ResizableSplit } from "@/components/resizable-split";
 import { FileText, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -68,21 +69,46 @@ export default function Home() {
 
       {/* Main content area */}
       <div className="flex flex-1 h-full min-w-0">
-        {/* Chat panel */}
-        <div className={cn("flex flex-col flex-1 min-w-0 h-full", viewerOpen && "hidden md:flex")}>
-          <ChatPanel
-            onToggleViewer={() => setViewerOpen((v) => !v)}
-            viewerOpen={viewerOpen}
-            onToggleSidebar={toggleSidebarCollapsed}
-            sidebarCollapsed={sidebarCollapsed}
-          />
+        {/* Desktop layout */}
+        <div className="hidden md:flex flex-1 min-w-0">
+          {viewerOpen ? (
+            <ResizableSplit
+              left={
+                <ChatPanel
+                  onToggleViewer={() => setViewerOpen((v) => !v)}
+                  viewerOpen={viewerOpen}
+                  onToggleSidebar={toggleSidebarCollapsed}
+                  sidebarCollapsed={sidebarCollapsed}
+                />
+              }
+              right={
+                <PdfViewer
+                  docId={activeDocId}
+                  scrollToPage={scrollToPage}
+                  highlightText={highlightText}
+                  onClose={() => setViewerOpen(false)}
+                  className="flex-1"
+                />
+              }
+              defaultRatio={0.55}
+              minLeftPx={320}
+              minRightPx={320}
+              storageKey="paperlens-split-ratio"
+            />
+          ) : (
+            <ChatPanel
+              onToggleViewer={() => setViewerOpen((v) => !v)}
+              viewerOpen={viewerOpen}
+              onToggleSidebar={toggleSidebarCollapsed}
+              sidebarCollapsed={sidebarCollapsed}
+            />
+          )}
         </div>
 
-        {/* PDF viewer — desktop split pane / mobile full screen */}
-        {viewerOpen && (
-          <>
-            {/* Desktop: side panel */}
-            <div className="hidden md:flex w-[45%] max-w-[600px] border-l border-[#e0ded6]">
+        {/* Mobile layout */}
+        <div className="flex md:hidden flex-1 min-w-0">
+          {viewerOpen ? (
+            <div className="fixed inset-0 z-30 flex flex-col bg-[#f0efe8]">
               <PdfViewer
                 docId={activeDocId}
                 scrollToPage={scrollToPage}
@@ -91,19 +117,15 @@ export default function Home() {
                 className="flex-1"
               />
             </div>
-
-            {/* Mobile: full screen overlay */}
-            <div className="fixed inset-0 z-30 flex flex-col bg-[#f0efe8] md:hidden">
-              <PdfViewer
-                docId={activeDocId}
-                scrollToPage={scrollToPage}
-                highlightText={highlightText}
-                onClose={() => setViewerOpen(false)}
-                className="flex-1"
-              />
-            </div>
-          </>
-        )}
+          ) : (
+            <ChatPanel
+              onToggleViewer={() => setViewerOpen((v) => !v)}
+              viewerOpen={viewerOpen}
+              onToggleSidebar={toggleSidebarCollapsed}
+              sidebarCollapsed={sidebarCollapsed}
+            />
+          )}
+        </div>
       </div>
 
       {/* Settings dialog */}
