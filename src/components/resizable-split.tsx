@@ -15,6 +15,20 @@ interface ResizableSplitProps {
   storageKey?: string;       // localStorage key for persistence
 }
 
+const GUTTER = 5; // px
+
+function loadRatio(storageKey: string, defaultRatio: number): number {
+  if (typeof window === "undefined") return defaultRatio;
+  try {
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      const v = parseFloat(saved);
+      if (v > 0 && v < 1) return v;
+    }
+  } catch {}
+  return defaultRatio;
+}
+
 export function ResizableSplit({
   left,
   right,
@@ -27,22 +41,27 @@ export function ResizableSplit({
   storageKey = "resizable-split",
 }: ResizableSplitProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const [ratio, setRatio] = React.useState(() => {
-    if (typeof window === "undefined") return defaultRatio;
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) return Math.max(0, Math.min(1, parseFloat(saved)));
-    } catch {}
-    return defaultRatio;
-  });
-  const dragging = React.useRef(false);
+  // Use ref for ratio — persisted ratio storage, no re-render dependency
+  const ratioRef = React.useRef(loadRatio(storageKey, defaultRatio));
+  const [leftWidth, setLeftWidth] = React.useState<number | null>(null);
+
+  // Measure container once on mount and set initial pixel width
+  React.useEffect(() => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const avail = rect.width - GUTTER;
+    const initial = avail * ratioRef.current;
+    setLeftWidth(Math.max(minLeftPx, Math.min(avail - minRightPx, initial)));
+  }, [minLeftPx, minRightPx]); // runs once since deps are stable
 
   // Persist ratio
   React.useEffect(() => {
+    if (!containerRef.current || leftWidth === null) return;
+    const ratio = leftWidth / (containerRef.current.getBoundingClientRect().width - GUTTER);
     try {
-      localStorage.setItem(storageKey, String(ratio));
+      localStorage.setItem(storageKey, ratio.toFixed(3));
     } catch {}
-  }, [ratio, storageKey]);
+  }, [leftWidth, storageKey]);
 
   const onPointerDown = React.useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -50,13 +69,15 @@ export function ResizableSplit({
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }, []);
 
+  const dragging = React.useRef(false);
+
   const onPointerMove = React.useCallback(
     (e: React.PointerEvent) => {
       if (!dragging.current || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const clamped = Math.max(minLeftPx / rect.width, Math.min(1 - minRightPx / rect.width, x / rect.width));
-      setRatio(clamped);
+      const clamped = Math.max(minLeftPx, Math.min(rect.width - GUTTER - minRightPx, x));
+      setLeftWidth(clamped);
     },
     [minLeftPx, minRightPx]
   );
@@ -73,10 +94,10 @@ export function ResizableSplit({
       onPointerUp={onPointerUp}
       onPointerLeave={onPointerUp}
     >
-      {/* Left pane */}
+      {/* Left pane — pixel width */}
       <div
-        className={cn("flex flex-col h-full overflow-hidden", leftClassName)}
-        style={{ width: `${ratio * 100}%` }}
+        className={cn("flex flex-col h-full overflow-hidden shrink-0", leftClassName)}
+        style={{ width: leftWidth ?? `${defaultRatio * 100}%` }}
       >
         {left}
       </div>
@@ -84,12 +105,12 @@ export function ResizableSplit({
       {/* Gutter / drag handle */}
       <div
         className={cn(
-          "relative shrink-0 w-[5px] cursor-col-resize hover:w-[7px] active:w-[7px] transition-[width] duration-75 group",
+          "relative shrink-0 cursor-col-resize hover:w-[7px] active:w-[7px] transition-[width] duration-75 group",
           "bg-[#e0ded6] hover:bg-[#1B365D]/20 active:bg-[#1B365D]/30",
           gutterClassName
         )}
+        style={{ width: `${GUTTER}px`, touchAction: "none" }}
         onPointerDown={onPointerDown}
-        style={{ touchAction: "none" }}
       >
         {/* Visual grip dots */}
         <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] flex flex-col items-center justify-center gap-[2px] opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity">
@@ -99,10 +120,10 @@ export function ResizableSplit({
         </div>
       </div>
 
-      {/* Right pane */}
+      {/* Right pane — flex-1 fills remaining space exactly */}
       <div
         className={cn("flex flex-col h-full overflow-hidden", rightClassName)}
-        style={{ width: `${(1 - ratio) * 100}%` }}
+        style={{ flex: "1 1 0", minWidth: `${minRightPx}px` }}
       >
         {right}
       </div>
