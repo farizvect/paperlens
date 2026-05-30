@@ -36,10 +36,14 @@ export default function Home() {
       const text = e.detail?.text;
       const range = e.detail?.highlightRange;
       if (page && typeof page === "number") {
-        setViewerOpen(true);
-        setScrollToPage(page);
-        if (text) setHighlightText(text);
-        setHighlightRange(range && typeof range.start === "number" && typeof range.end === "number" ? range : null);
+        // Don't open PDF viewer on mobile
+        const isMobile = window.matchMedia("(max-width: 768px)").matches;
+        if (!isMobile) {
+          setViewerOpen(true);
+          setScrollToPage(page);
+          if (text) setHighlightText(text);
+          setHighlightRange(range && typeof range.start === "number" && typeof range.end === "number" ? range : null);
+        }
         // Reset after a tick so the PdfViewer picks it up
         setTimeout(() => setScrollToPage(null), 500);
       }
@@ -98,7 +102,13 @@ export default function Home() {
 
         {/* Mobile layout */}
         <div className="flex md:hidden min-w-0 min-h-0 h-full" style={{ gridColumn: "1 / -1" }}>
-          {viewerOpen ? (
+          <ChatPanel
+            onToggleViewer={() => setViewerOpen((v) => !v)}
+            viewerOpen={viewerOpen}
+            onToggleSidebar={toggleSidebarCollapsed}
+            sidebarCollapsed={sidebarCollapsed}
+          />
+          {viewerOpen && (
             <div className="fixed inset-0 z-30 flex flex-col bg-[#f0efe8]">
               <PdfViewer
                 docId={activeDocId}
@@ -109,13 +119,6 @@ export default function Home() {
                 className="flex-1"
               />
             </div>
-          ) : (
-            <ChatPanel
-              onToggleViewer={() => setViewerOpen((v) => !v)}
-              viewerOpen={viewerOpen}
-              onToggleSidebar={toggleSidebarCollapsed}
-              sidebarCollapsed={sidebarCollapsed}
-            />
           )}
         </div>
       </div>
