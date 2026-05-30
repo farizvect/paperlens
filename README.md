@@ -39,19 +39,64 @@
 
 ## Getting Started
 
+### Prerequisites
+
+- **Node.js** 18+ (recommended: 20+)
+- **npm** or **yarn** or **bun**
+- **OpenAI-compatible API key** (OpenAI, Anthropic, Groq, Together, etc.)
+
+### Installation
+
 ```bash
+# Clone the repo
+git clone https://github.com/farizvect/paperlens.git
+cd paperlens
+
 # Install dependencies
 npm install
 
-# Run dev server
+# Start dev server
 npm run dev
+```
 
-# Build for production
+Dev server runs on `http://localhost:3005` by default.
+
+### First Launch
+
+1. Open `http://localhost:3005` in your browser
+2. Click **Settings** in the sidebar
+3. Enter your API credentials:
+   - **Base URL** — e.g., `https://api.openai.com/v1`
+   - **API Key** — your API key
+   - **Model** — e.g., `gpt-4o-mini`
+4. Upload a PDF via drag-drop or file picker
+5. Start chatting with your document
+
+### Production Build
+
+```bash
 npm run build
 npm run start
 ```
 
-Dev server runs on `http://localhost:3005` by default.
+### Environment Variables (Optional)
+
+Create `.env.local` for server-side defaults:
+
+```env
+# Default API base URL (client can override via Settings)
+NEXT_PUBLIC_API_BASE_URL=https://api.openai.com/v1
+
+# Rate limiting (requests per minute per IP)
+RATE_LIMIT_RPM=30
+```
+
+### Docker (Optional)
+
+```bash
+docker build -t paperlens .
+docker run -p 3005:3005 paperlens
+```
 
 ## Testing
 
