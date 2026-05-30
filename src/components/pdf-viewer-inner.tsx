@@ -76,7 +76,7 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, highlightRa
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null);
   const [numPages, setNumPages] = React.useState(0);
   const [currentPage, setCurrentPage] = React.useState(1);
-  const [scale, setScale] = React.useState(1.3);
+  const [scale, setScale] = React.useState(1.0);
   const [pageInput, setPageInput] = React.useState("");
   const [pageHeight, setPageHeight] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
@@ -141,6 +141,40 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, highlightRa
     return () => {
       revoked = true;
     };
+  }, [docId]);
+
+  // Auto-fit width on first load and when container resizes (split gutter drag)
+  const hasAutoFit = React.useRef(false);
+  React.useEffect(() => {
+    if (!numPages || pageHeight === 0) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Initial fit
+    if (!hasAutoFit.current) {
+      const timer = setTimeout(() => {
+        handleFitWidth();
+        hasAutoFit.current = true;
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+
+    // Re-fit when container width changes (split gutter drag, window resize)
+    let fitTimer: ReturnType<typeof setTimeout>;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(fitTimer);
+      fitTimer = setTimeout(() => handleFitWidth(), 50);
+    });
+    ro.observe(container);
+    return () => {
+      ro.disconnect();
+      clearTimeout(fitTimer);
+    };
+  }, [numPages, pageHeight]);
+
+  // Reset auto-fit when doc changes
+  React.useEffect(() => {
+    hasAutoFit.current = false;
   }, [docId]);
 
   // Cleanup blob URL
@@ -219,6 +253,9 @@ export function PdfViewerInner({ docId, scrollToPage, highlightText, highlightRa
   // Highlight text in PDF text layer when source changes
   React.useEffect(() => {
     if (!highlightText && !highlightRange) return;
+
+    // Clear ALL existing highlights first (across all pages)
+    document.querySelectorAll(".pdf-source-highlight").forEach((el) => el.remove());
 
     // Wait for text layer to render (react-pdf renders async)
     const timer = setTimeout(() => {

@@ -15,8 +15,16 @@ export default function Home() {
   const setSidebarOpen = useChatStore((s) => s.setSidebarOpen);
   const toggleSidebarCollapsed = useChatStore((s) => s.toggleSidebarCollapsed);
   const activeDocId = useChatStore((s) => s.activeDocId);
+  const activeDocIds = useChatStore((s) => s.activeDocIds);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [viewerOpen, setViewerOpen] = React.useState(false);
+
+  // Auto-close PDF viewer when 2+ docs are merged
+  React.useEffect(() => {
+    if (activeDocIds.length > 1 && viewerOpen) {
+      setViewerOpen(false);
+    }
+  }, [activeDocIds, viewerOpen]);
   const [scrollToPage, setScrollToPage] = React.useState<number | null>(null);
   const [highlightText, setHighlightText] = React.useState<string | null>(null);
   const [highlightRange, setHighlightRange] = React.useState<{ page: number; start: number; end: number } | null>(null);

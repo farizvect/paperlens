@@ -29,6 +29,7 @@ interface ChatInputProps {
   onKeyQuotes: () => void;
   onToggleViewer?: () => void;
   viewerOpen?: boolean;
+  multiDoc?: boolean;
 }
 
 export function ChatInput({
@@ -45,6 +46,7 @@ export function ChatInput({
   onKeyQuotes,
   onToggleViewer,
   viewerOpen,
+  multiDoc,
 }: ChatInputProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
@@ -107,13 +109,20 @@ export function ChatInput({
           </button>
           {onToggleViewer && (
             <button
-              onClick={onToggleViewer}
+              onClick={() => {
+                if (multiDoc) return;
+                onToggleViewer();
+              }}
+              disabled={multiDoc}
               className={cn(
                 "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition-colors",
-                viewerOpen
-                  ? "border-[#1B365D]/30 bg-[#1B365D]/10 text-[#1B365D]"
-                  : "border-[#e0ded6] bg-[#faf9f3] text-[#8a8a82] hover:border-[#1B365D]/30 hover:text-[#1B365D]"
+                multiDoc
+                  ? "border-[#e0ded6] bg-[#faf9f3] text-[#c0bfb8] cursor-not-allowed"
+                  : viewerOpen
+                    ? "border-[#1B365D]/30 bg-[#1B365D]/10 text-[#1B365D]"
+                    : "border-[#e0ded6] bg-[#faf9f3] text-[#8a8a82] hover:border-[#1B365D]/30 hover:text-[#1B365D]"
               )}
+              title={multiDoc ? "PDF viewer unavailable in multi-doc mode" : undefined}
             >
               {viewerOpen ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
               PDF Viewer

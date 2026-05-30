@@ -222,7 +222,22 @@ export function ChatPanel({ onToggleViewer, viewerOpen, onToggleSidebar, sidebar
           </div>
           <div className="flex items-center gap-2">
             {onToggleViewer && (
-              <button onClick={onToggleViewer} className={cn("rounded-lg p-1.5 transition-colors", viewerOpen ? "bg-[#1B365D]/10 text-[#1B365D]" : "text-[#8a8a82] hover:bg-[#f5f4ed] hover:text-[#2a2a28]")} title={viewerOpen ? "Close PDF viewer" : "Open PDF viewer"}>
+              <button
+                onClick={() => {
+                  if (effectiveDocIds.length > 1) return;
+                  onToggleViewer();
+                }}
+                disabled={effectiveDocIds.length > 1}
+                className={cn(
+                  "rounded-lg p-1.5 transition-colors",
+                  effectiveDocIds.length > 1
+                    ? "text-[#c0bfb8] cursor-not-allowed"
+                    : viewerOpen
+                      ? "bg-[#1B365D]/10 text-[#1B365D]"
+                      : "text-[#8a8a82] hover:bg-[#f5f4ed] hover:text-[#2a2a28]"
+                )}
+                title={effectiveDocIds.length > 1 ? "PDF viewer unavailable in multi-doc mode" : viewerOpen ? "Close PDF viewer" : "Open PDF viewer"}
+              >
                 {viewerOpen ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
               </button>
             )}
@@ -258,6 +273,7 @@ export function ChatPanel({ onToggleViewer, viewerOpen, onToggleSidebar, sidebar
           onKeyQuotes={handleKeyQuotes}
           onToggleViewer={onToggleViewer}
           viewerOpen={viewerOpen}
+          multiDoc={effectiveDocIds.length > 1}
         />
       </div>
     </div>
