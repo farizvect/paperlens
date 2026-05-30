@@ -81,22 +81,23 @@ npm run start
 
 ### Environment Variables (Optional)
 
-Create `.env.local` for server-side defaults:
-
-```env
-# Default API base URL (client can override via Settings)
-NEXT_PUBLIC_API_BASE_URL=https://api.openai.com/v1
-
-# Rate limiting (requests per minute per IP)
-RATE_LIMIT_RPM=30
-```
-
-### Docker (Optional)
+Copy the example env file and configure your API defaults:
 
 ```bash
-docker build -t paperlens .
-docker run -p 3005:3005 paperlens
+cp .env.example .env
 ```
+
+Edit `.env` with your credentials:
+
+```env
+# LLM API Configuration (OpenAI-compatible)
+# Users can also override these via the Settings dialog in the UI.
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=sk-your-api-key-here
+```
+
+These are server-side defaults. Users can override them via the Settings dialog in the UI.
 
 ## Testing
 
