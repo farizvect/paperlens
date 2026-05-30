@@ -2,7 +2,7 @@
 
 > Upload scientific PDFs — thesis, journals, reports — and chat with AI about their content. Your documents stay in your browser, nothing leaves your device.
 
-![PaperLens Homepage](public/screenshot.png)
+![PaperLens — PDF chat with source citations and viewer](public/screenshot.jpg)
 
 ## Features
 
@@ -23,38 +23,6 @@
 - **Chat history persistence** — conversations saved per document, restored on revisit
 - **Token usage display** — shows input/output token counts per response
 - **Onboarding tutorial** — guided first-use experience
-
-## Screenshots
-
-### Upload & Document Management
-
-![Upload Interface](public/screenshot-upload.png)
-
-Upload PDFs via drag-drop or file picker. Documents are processed client-side with `unpdf` and chunked into searchable segments.
-
-### Chat with AI
-
-![Chat Interface](public/screenshot-chat.png)
-
-Ask questions about your documents and get AI-powered answers with source citations. Click `[Source N]` badges to see the exact excerpt from the PDF.
-
-### Source Citations
-
-![Source Citation Card](public/screenshot-source.png)
-
-Each source citation shows the page number, section name, and relevant text excerpt. Transparency in every answer.
-
-### PDF Viewer
-
-![PDF Viewer](public/screenshot-pdf.png)
-
-Built-in PDF viewer with zoom controls, page navigation, and automatic source highlighting. Only renders visible pages (currentPage ± 2) with spacer divs to maintain scroll position — no mobile crash on large PDFs.
-
-### BYOK Settings
-
-![Settings Dialog](public/screenshot-settings.png)
-
-Configure your own OpenAI-compatible API endpoint, key, and model. Works with any provider that supports the OpenAI API format.
 
 ## Stack
 
