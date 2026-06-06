@@ -4,6 +4,10 @@
 
 ![PaperLens — PDF chat with source citations and viewer](public/screenshot.jpg)
 
+## Feature Overview
+
+![PaperLens — feature overview infographic (bento-grid, hand-drawn paper-craft style)](infographic/paperlens/infographic.png)
+
 ## Features
 
 - **Multi-PDF chat** — select multiple documents and ask questions across all of them
