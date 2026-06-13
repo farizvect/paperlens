@@ -1,9 +1,6 @@
 # PaperLens
 
-> Upload scientific PDFs — thesis, journals, reports — and chat with AI about their content. Your documents stay in your browser, nothing leaves your device.
 ![PaperLens — feature overview infographic (bento-grid, hand-drawn paper-craft style)](infographic/paperlens/infographic.png)
-
-## Demo
 
 ![PaperLens demo — chat with PDFs, sourced answers, fully client-side](public/paperlens-demo.gif)
 
