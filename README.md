@@ -5,7 +5,9 @@
 
 ## Demo
 
-<video src="https://github.com/farizvect/paperlens/raw/main/public/paperlens-promo.mp4" controls width="100%"></video>
+![PaperLens demo — chat with PDFs, sourced answers, fully client-side](public/paperlens-demo.gif)
+
+▶️ [Watch with narration (MP4)](public/paperlens-promo.mp4)
 
 ![PaperLens — PDF chat with source citations and viewer](public/screenshot.jpg)
 
