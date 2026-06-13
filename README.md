@@ -4,8 +4,6 @@
 
 ![PaperLens demo — chat with PDFs, sourced answers, fully client-side](public/paperlens-demo.gif)
 
-▶️ [Watch the narrated promo (MP4)](https://github.com/farizvect/paperlens/releases/download/v0.1.0/paperlens-promo.mp4)
-
 ![PaperLens — PDF chat with source citations and viewer](public/screenshot.jpg)
 
 
