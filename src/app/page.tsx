@@ -25,6 +25,14 @@ export default function Home() {
       setViewerOpen(false);
     }
   }, [activeDocIds, viewerOpen]);
+
+  // Close PDF viewer when active document is deleted
+  React.useEffect(() => {
+    if (!activeDocId && viewerOpen) {
+      setViewerOpen(false);
+    }
+  }, [activeDocId, viewerOpen]);
+
   const [scrollToPage, setScrollToPage] = React.useState<number | null>(null);
   const [highlightText, setHighlightText] = React.useState<string | null>(null);
   const [highlightRange, setHighlightRange] = React.useState<{ page: number; start: number; end: number } | null>(null);

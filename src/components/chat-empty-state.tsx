@@ -90,7 +90,7 @@ export function ChatEmptyState({
             {sidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
           </button>
           {sidebarCollapsed && (
-            <h2 className="text-sm font-medium text-[#1B365D]">PaperLens</h2>
+            <div className="text-sm font-medium text-[#1B365D]">PaperLens</div>
           )}
           <div className="ml-auto flex items-center gap-2">
             {onToggleViewer && (

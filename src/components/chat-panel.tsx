@@ -214,7 +214,7 @@ export function ChatPanel({ onToggleViewer, viewerOpen, onToggleSidebar, sidebar
                 {sidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
               </button>
             )}
-            {sidebarCollapsed && <h2 className="text-sm font-medium text-[#1B365D]">PaperLens</h2>}
+            {sidebarCollapsed && <span className="text-sm font-medium text-[#1B365D]">PaperLens</span>}
             <h2 className="text-sm font-medium text-[#1B365D] truncate max-w-md">{activeDocName || "Chat"}</h2>
             {effectiveDocIds.length > 1 && (
               <span className="rounded-full bg-[#1B365D]/10 px-2 py-0.5 text-xs text-[#1B365D]">{effectiveDocIds.length} docs</span>
