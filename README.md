@@ -102,17 +102,28 @@ LLM_API_KEY=sk-your-api-key-here
 
 These are server-side defaults. Users can override them via the Settings dialog in the UI.
 
+> **Security:** the server-side key fallback is **off by default**. If no client key
+> is provided, `/api/chat` responds with a BYOK prompt rather than spending your
+> `.env` key for strangers. To allow clients without their own key to use the
+> server key (localhost / trusted LAN), set `ALLOW_SERVER_KEY=1`. On a public
+> deployment, leave it off — otherwise your endpoint becomes an open proxy.
+
 ## Testing
 
 ```bash
-# Run Playwright tests
+# Run unit tests (chunker, BM25, source parsing — fast, no browser)
+npm run test:unit
+
+# Run Playwright e2e tests
 npx playwright test
 
 # Run with UI
 npx playwright test --ui
 ```
 
-Tests cover layout integrity, PDF upload, viewer functionality, and virtualization behavior.
+Unit tests cover the pure logic (chunking, BM25 scoring, `[Source N]` parsing,
+suggestion-tag stripping). E2E tests cover layout integrity, PDF upload, viewer
+functionality, and virtualization behavior.
 
 ## Project Structure
 
@@ -140,26 +151,29 @@ src/
 │   ├── loading-skeleton.tsx  # Shimmer loading states
 │   └── ui/                   # shadcn/ui primitives
 ├── hooks/
-│   └── use-chat-streaming.ts # Chat streaming + source handling
+│   ├── use-chat-streaming.ts # Chat streaming + source handling
+│   ├── use-hybrid-search.ts  # Hybrid BM25+semantic search hook
+│   └── use-pdf-upload.ts     # PDF upload (drag-drop / picker)
 ├── lib/
 │   ├── client/
 │   │   ├── pdf.ts            # unpdf text extraction + pdf.js text items
-│   │   └── storage.ts        # IndexedDB (documents, chunks, chats)
+│   │   ├── storage.ts        # IndexedDB (documents, chunks, chats, embeddings)
+│   │   ├── upload.ts         # Shared processPdfFile pipeline
+│   │   └── source-parser.ts  # [Source N] citation parsing
 │   ├── rag/
 │   │   ├── chunker.ts        # Sentence-boundary chunking (1000 char, 200 overlap)
 │   │   ├── embeddings.ts     # @huggingface/transformers embeddings
 │   │   └── highlight-anchors.ts  # Text-item position extraction for PDF highlighting
 │   ├── search/
-│   │   └── hybrid.ts         # BM25 + semantic hybrid search
+│   │   ├── hybrid-search.ts  # BM25 + semantic hybrid scoring
+│   │   └── embedding-cache.ts    # Per-doc embedding warm-up + readiness cache
 │   ├── rate-limit.ts         # Server-side rate limiting
 │   └── utils.ts              # cn() utility
 ├── store/
 │   └── chat.ts               # Zustand store (messages, activeDoc, llmSettings)
 tests/
-├── layout.spec.ts            # Layout integrity tests
-├── upload.spec.ts            # PDF upload tests
-├── pdf-viewer.spec.ts        # PDF viewer and virtualization tests
-└── highlight-anchors.spec.ts # Highlight anchor extraction tests
+├── unit/                     # Vitest: chunker, BM25, source parsing, suggestions
+└── *.spec.ts                 # Playwright e2e (layout, upload, viewer)
 ```
 
 ## Configuration
@@ -186,8 +200,8 @@ Settings are persisted in `localStorage`.
 
 1. **Upload** — PDF is parsed client-side with `unpdf`; pdf.js text items extracted with position data for coordinate-based highlighting
 2. **Chunk** — Text chunked into ~1000-char segments with section awareness; each chunk stores `highlightRange` (page, start, end text-item indices)
-3. **Embed** — Chunks embedded with `@huggingface/transformers` for semantic search
-4. **Store** — Chunks + embeddings saved to IndexedDB with full-text search index
+3. **Embed** — Embeddings computed client-side in the background right after upload (`all-MiniLM-L6-v2` via transformers.js) and cached in IndexedDB, so hybrid search is ready before your first question
+4. **Store** — Documents, chunks, and chat history saved to IndexedDB
 5. **Query** — User question runs hybrid search (BM25 + semantic), top 8 results selected
 6. **Stream** — Context + question sent to LLM via `/api/chat` (SSE streaming)
 7. **Display** — Response rendered as Markdown with `[Source N]` citation badges

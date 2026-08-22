@@ -47,7 +47,7 @@ export function ChatPanel({ onToggleViewer, viewerOpen, onToggleSidebar, sidebar
     uploading, uploadError, setUploadError, uploadSuccess, dragOver,
     handleFile, handleDrop, handleDragOver, handleDragLeave, fileInputRef,
   } = usePdfUpload();
-  const { sendMessage } = useChatStreaming({
+  const { sendMessage, stop } = useChatStreaming({
     addMessage,
     appendToMessage,
     setLoading,
@@ -274,6 +274,7 @@ export function ChatPanel({ onToggleViewer, viewerOpen, onToggleSidebar, sidebar
           onToggleViewer={onToggleViewer}
           viewerOpen={viewerOpen}
           multiDoc={effectiveDocIds.length > 1}
+          onStop={stop}
         />
       </div>
     </div>

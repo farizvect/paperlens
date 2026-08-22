@@ -12,6 +12,8 @@ build/
 .env
 .env.local
 .env.*.local
+test-results/
+dogfood-output/
 
 # Debug
 npm-debug.log*

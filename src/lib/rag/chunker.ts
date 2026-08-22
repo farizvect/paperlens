@@ -42,19 +42,45 @@ function isHeading(line: string): boolean {
   return false;
 }
 
-// Extract section headings from text, return map of position -> heading
-function extractSections(text: string): Map<number, string> {
-  const sections = new Map<number, string>();
-  const lines = text.split(/\n/);
-  let pos = 0;
-
-  for (const line of lines) {
-    if (isHeading(line)) {
-      sections.set(pos, line.trim());
-    }
-    pos += line.length + 1; // +1 for newline
+/**
+ * Collapse whitespace exactly like `text.replace(/\s+/g, " ").trim()` while
+ * also returning the CLEANED-text position where each non-empty original line
+ * starts. Section positions and chunk positions therefore share one coordinate
+ * space (previously they used different spaces, which made section labels
+ * drift on longer pages).
+ */
+function cleanWithLineStarts(pageText: string): { cleaned: string; lineStarts: number[] } {
+  const lines = pageText.split("\n");
+  const lineStarts: number[] = [];
+  const parts: string[] = [];
+  let offset = 0;
+  for (const rawLine of lines) {
+    const collapsed = rawLine.replace(/\s+/g, " ").trim();
+    if (!collapsed) continue;
+    lineStarts.push(offset);
+    if (parts.length > 0) offset += 1; // the joining space between lines
+    parts.push(collapsed);
+    offset += collapsed.length;
   }
+  return { cleaned: parts.join(" "), lineStarts };
+}
 
+/**
+ * Build a map of cleaned-text position -> section heading.
+ * `lineStarts[i]` is the cleaned start position of the i-th non-empty
+ * original line, so we can pair each heading line with its cleaned position.
+ */
+function extractSections(pageText: string, lineStarts: number[]): Map<number, string> {
+  const sections = new Map<number, string>();
+  let lineIdx = 0;
+  for (const rawLine of pageText.split("\n")) {
+    const collapsed = rawLine.replace(/\s+/g, " ").trim();
+    if (!collapsed) continue;
+    if (isHeading(rawLine)) {
+      sections.set(lineStarts[lineIdx], collapsed);
+    }
+    lineIdx++;
+  }
   return sections;
 }
 
@@ -83,20 +109,20 @@ export function chunkText(input: string | string[]): Chunk[] {
     const pageText = pages[pageNum];
     if (!pageText || pageText.trim().length === 0) continue;
 
-    const cleaned = pageText.replace(/\s+/g, " ").trim();
+    const { cleaned, lineStarts } = cleanWithLineStarts(pageText);
     if (cleaned.length === 0) continue;
 
-    // Extract section headings from the original (non-cleaned) page text
-    const sections = extractSections(pageText);
+    const sections = extractSections(pageText, lineStarts);
 
     const sentences = splitIntoSentences(cleaned);
     let current = "";
-    let currentPos = 0;
+    let currentStartPos = 0; // cleaned-text position where `current` begins
+    let currentPos = 0; // cleaned-text position after the last processed sentence
 
     for (const sentence of sentences) {
       if (current.length + sentence.length > CHUNK_SIZE && current.length > 0) {
         if (current.trim().length >= MIN_FRAG_LENGTH) {
-          const section = findCurrentSection(sections, currentPos - current.length);
+          const section = findCurrentSection(sections, currentStartPos);
           const prefix = section ? `[${section}]\n` : "";
           chunks.push({
             text: prefix + current.trim(),
@@ -109,15 +135,20 @@ export function chunkText(input: string | string[]): Chunk[] {
         let overlapText = current.slice(-CHUNK_OVERLAP);
         const firstSpace = overlapText.indexOf(" ");
         if (firstSpace > 0) overlapText = overlapText.slice(firstSpace + 1);
+        // The new chunk starts at the overlap text's start position.
+        // currentPos already counts the flushed sentences, so subtract the
+        // overlap length (not the full current length — that was the bug).
+        currentStartPos = currentPos - overlapText.length;
         current = overlapText + sentence;
       } else {
+        if (current.length === 0) currentStartPos = currentPos;
         current += sentence;
       }
       currentPos += sentence.length;
     }
 
     if (current.trim().length >= MIN_FRAG_LENGTH) {
-      const section = findCurrentSection(sections, currentPos - current.length);
+      const section = findCurrentSection(sections, currentStartPos);
       const prefix = section ? `[${section}]\n` : "";
       chunks.push({
         text: prefix + current.trim(),

@@ -1,9 +1,18 @@
 import { NextRequest } from "next/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 
+interface ContextChunk {
+  docName: string;
+  chunkIndex: number;
+  text: string;
+  page?: number;
+  section?: string;
+  highlightRange?: { page: number; start: number; end: number };
+}
+
 interface ChatRequestBody {
   message: string;
-  context?: { docName: string; chunkIndex: number; text: string; page?: number; section?: string; highlightRange?: { page: number; start: number; end: number } }[];
+  context?: ContextChunk[];
   history?: { role: string; content: string }[];
   // BYOK overrides (optional)
   baseUrl?: string;
@@ -11,10 +20,22 @@ interface ChatRequestBody {
   model?: string;
 }
 
-// Server defaults (from .env)
-const DEFAULT_BASE = process.env.LLM_BASE_URL || "https://token-plan-sgp.xiaomimimo.com/v1";
-const DEFAULT_MODEL = process.env.LLM_MODEL || "mimo-v2.5-pro";
-const DEFAULT_KEY = process.env.LLM_API_KEY || process.env.MIMO_API_KEY;
+// ---- Limits ----
+const MAX_MESSAGE_CHARS = 10_000;
+const MAX_CONTEXT_CHUNKS = 20;
+const MAX_CHUNK_CHARS = 16_000; // per context chunk (client chunks are ~1000 chars)
+const MAX_CONTEXT_TOTAL_CHARS = 120_000;
+const MAX_HISTORY_ITEMS = 30;
+const MAX_HISTORY_ITEM_CHARS = 8_000;
+
+// ---- Server defaults (from .env) ----
+// The server-side API key is OPT-IN. On a public deployment the chat endpoint
+// would otherwise be an open proxy spending your key for anyone who finds it.
+// Set ALLOW_SERVER_KEY=1 to let clients without their own key use the server key.
+const ALLOW_SERVER_KEY =
+  process.env.ALLOW_SERVER_KEY === "1" || process.env.ALLOW_SERVER_KEY === "true";
+const DEFAULT_BASE = process.env.LLM_BASE_URL || "";
+const FALLBACK_MODEL = "gpt-4o-mini";
 
 // SSRF protection — block private/internal IPs
 const BLOCKED_HOSTS = /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|::1|0:0:0:0:0:0:0:1|\[::1\])$/i;
@@ -37,87 +58,146 @@ function isAllowedUrl(url: string): boolean {
   }
 }
 
+function jsonError(error: string, status = 400): Response {
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export async function POST(request: NextRequest) {
   let body: ChatRequestBody;
   try {
     body = await request.json();
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonError("Invalid JSON body");
   }
   const { message, context, history, baseUrl, apiKey, model } = body;
 
   if (!message || typeof message !== "string") {
-    return new Response(JSON.stringify({ error: "Message is required" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonError("Message is required");
   }
-
-  if (message.length > 10000) {
-    return new Response(JSON.stringify({ error: "Message too long (max 10000 chars)" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Validate array sizes
-  if (context && (!Array.isArray(context) || context.length > 20)) {
-    return new Response(JSON.stringify({ error: "Context array too large (max 20)" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  if (history && (!Array.isArray(history) || history.length > 30)) {
-    return new Response(JSON.stringify({ error: "History array too large (max 30)" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+  if (message.length > MAX_MESSAGE_CHARS) {
+    return jsonError(`Message too long (max ${MAX_MESSAGE_CHARS} chars)`);
   }
 
   // Rate limiting
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const ip =
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   const rl = checkRateLimit(ip);
   if (!rl.ok) {
     return new Response(
       JSON.stringify({ error: `Rate limit exceeded. Try again in ${rl.retryAfter}s.` }),
-      { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(rl.retryAfter) } }
+      {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": String(rl.retryAfter) },
+      }
     );
   }
 
-  // SSRF: validate baseUrl before use
-  let resolvedBase = DEFAULT_BASE;
-  if (baseUrl) {
-    if (!isAllowedUrl(baseUrl)) {
-      return new Response(
-        JSON.stringify({ error: "Invalid base URL. Must be https and not a private/internal address." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+  // Validate + sanitize history: only user/assistant roles survive.
+  // Without this, a crafted client could inject a "system" message after our
+  // anti-jailbreak prompt and override it.
+  if (history !== undefined) {
+    if (!Array.isArray(history) || history.length > MAX_HISTORY_ITEMS) {
+      return jsonError(`History array too large (max ${MAX_HISTORY_ITEMS})`);
     }
-    resolvedBase = baseUrl;
+    for (const m of history) {
+      if (
+        !m ||
+        typeof m !== "object" ||
+        (m.role !== "user" && m.role !== "assistant") ||
+        typeof m.content !== "string"
+      ) {
+        return jsonError("Invalid history entry (role must be user|assistant, content must be a string)");
+      }
+      if (m.content.length > MAX_HISTORY_ITEM_CHARS) {
+        return jsonError(`History item too long (max ${MAX_HISTORY_ITEM_CHARS} chars)`);
+      }
+    }
   }
-  const resolvedKey = apiKey || DEFAULT_KEY;
-  const resolvedModel = model || DEFAULT_MODEL;
+  const sanitizedHistory = (history ?? []).map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
 
-  if (!resolvedKey) {
-    return new Response(
-      JSON.stringify({ error: "No API key configured. Set one in Settings or configure LLM_API_KEY in .env" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
+  // Validate + sanitize context chunks
+  if (context !== undefined) {
+    if (!Array.isArray(context) || context.length > MAX_CONTEXT_CHUNKS) {
+      return jsonError(`Context array too large (max ${MAX_CONTEXT_CHUNKS})`);
+    }
+    let totalChars = 0;
+    for (const r of context) {
+      if (
+        !r ||
+        typeof r !== "object" ||
+        typeof r.text !== "string" ||
+        typeof r.docName !== "string" ||
+        typeof r.chunkIndex !== "number"
+      ) {
+        return jsonError("Invalid context entry");
+      }
+      if (r.text.length > MAX_CHUNK_CHARS) {
+        return jsonError(`Context chunk too large (max ${MAX_CHUNK_CHARS} chars)`);
+      }
+      totalChars += r.text.length;
+      if (totalChars > MAX_CONTEXT_TOTAL_CHARS) {
+        return jsonError(`Context too large (max ${MAX_CONTEXT_TOTAL_CHARS} chars total)`);
+      }
+    }
+  }
+
+  // ---- Resolve LLM credentials ----
+  const clientKey = typeof apiKey === "string" ? apiKey.trim() : "";
+  const clientBase = typeof baseUrl === "string" ? baseUrl.trim() : "";
+  const clientModel = typeof model === "string" ? model.trim() : "";
+
+  let resolvedBase: string;
+  let resolvedKey: string;
+
+  if (clientKey) {
+    // BYOK — client must specify which endpoint its key belongs to
+    if (!clientBase) {
+      return jsonError("Base URL is required when using a custom API key.");
+    }
+    if (!isAllowedUrl(clientBase)) {
+      return jsonError("Invalid base URL. Must be https and not a private/internal address.");
+    }
+    resolvedBase = clientBase;
+    resolvedKey = clientKey;
+  } else if (ALLOW_SERVER_KEY) {
+    // Server-key mode (opt-in via ALLOW_SERVER_KEY=1)
+    resolvedKey = process.env.LLM_API_KEY || process.env.MIMO_API_KEY || "";
+    if (!resolvedKey) {
+      return jsonError("No API key configured. Set LLM_API_KEY in .env", 400);
+    }
+    if (clientBase) {
+      if (!isAllowedUrl(clientBase)) {
+        return jsonError("Invalid base URL. Must be https and not a private/internal address.");
+      }
+      resolvedBase = clientBase;
+    } else {
+      resolvedBase = DEFAULT_BASE;
+      if (!resolvedBase) {
+        return jsonError("Server LLM_BASE_URL is not configured.", 500);
+      }
+    }
+  } else {
+    return jsonError(
+      "No API key provided. Add your key in Settings (bring-your-own-key), or enable ALLOW_SERVER_KEY=1 on the server to use its default key."
     );
   }
+
+  const resolvedModel = clientModel || process.env.LLM_MODEL || FALLBACK_MODEL;
 
   // Build context from client-provided chunks
-  const contextParts = (context ?? []).map(
-    (r, i) => {
-      const meta = [`from "${r.docName}"`];
-      if (r.page) meta.push(`p.${r.page}`);
-      if (r.section) meta.push(r.section);
-      meta.push(`chunk ${r.chunkIndex}`);
-      return `[Source ${i + 1}] (${meta.join(", ")}):\n${r.text}`;
-    }
-  );
+  const contextParts = (context ?? []).map((r, i) => {
+    const meta = [`from "${r.docName}"`];
+    if (r.page) meta.push(`p.${r.page}`);
+    if (r.section) meta.push(r.section);
+    meta.push(`chunk ${r.chunkIndex}`);
+    return "[Source " + (i + 1) + "] (" + meta.join(", ") + "):\n" + r.text;
+  });
   const contextStr = contextParts.join("\n\n");
 
   const systemMsg = contextStr
@@ -152,60 +232,67 @@ After your complete answer, suggest 2-3 relevant follow-up questions the user mi
 
   const messages = [
     { role: "system", content: systemMsg },
-    ...(history ?? []),
+    ...sanitizedHistory,
     { role: "user", content: message },
   ];
 
   const endpoint = `${resolvedBase.replace(/\/+$/, "")}/chat/completions`;
 
+  const buildRequestBody = (includeUsage: boolean) => {
+    const payload: Record<string, unknown> = {
+      model: resolvedModel,
+      messages,
+      stream: true,
+    };
+    if (includeUsage) payload.stream_options = { include_usage: true };
+    return JSON.stringify(payload);
+  };
+
+  // Initial fetch with retries. Some OpenAI-compatible providers reject
+  // stream_options — retry once without it on a 400.
   let llmResponse: Response | null = null;
+  let includeUsage = true;
   const maxRetries = 2;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      llmResponse = await fetch(endpoint, {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${resolvedKey}`,
         },
-          body: JSON.stringify({
-            model: resolvedModel,
-            messages,
-            stream: true,
-            stream_options: { include_usage: true },
-          }),
+        body: buildRequestBody(includeUsage),
         signal: AbortSignal.timeout(120_000),
       });
+      if (!res.ok && res.status === 400 && includeUsage) {
+        // Provider may not support stream_options — retry without it
+        await res.text().catch(() => {});
+        includeUsage = false;
+        attempt--; // don't count this against the retry budget
+        continue;
+      }
+      llmResponse = res;
       break;
     } catch (err) {
       if (attempt === maxRetries) {
         console.error("LLM API failed after retries:", err);
         const detail = err instanceof Error ? err.message : "unknown error";
-        return new Response(
-          JSON.stringify({ error: `AI service unreachable: ${detail}` }),
-          { status: 502, headers: { "Content-Type": "application/json" } }
-        );
+        return jsonError(`AI service unreachable: ${detail}`, 502);
       }
       await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
     }
   }
 
   if (llmResponse === null) {
-    return new Response(
-      JSON.stringify({ error: "LLM service unavailable" }),
-      { status: 502, headers: { "Content-Type": "application/json" } }
-    );
+    return jsonError("LLM service unavailable", 502);
   }
 
   const response = llmResponse;
 
   if (!response.ok) {
-    const errText = await response.text();
-    console.error("LLM API error:", errText);
-    return new Response(JSON.stringify({ error: `LLM request failed: ${response.status}` }), {
-      status: 502,
-      headers: { "Content-Type": "application/json" },
-    });
+    const errText = (await response.text()).slice(0, 500);
+    console.error("LLM API error:", response.status, errText);
+    return jsonError(`LLM request failed: ${response.status}`, 502);
   }
 
   const encoder = new TextEncoder();
@@ -214,84 +301,120 @@ After your complete answer, suggest 2-3 relevant follow-up questions the user mi
   const stream = new ReadableStream({
     async start(controller) {
       const reader = response.body?.getReader();
+      const send = (payload: Record<string, unknown>): boolean => {
+        // Returns false once the client has disconnected
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
       if (!reader) {
+        send({ type: "error", error: "Upstream returned no body" });
+        send({ type: "done" });
         controller.close();
         return;
       }
 
       let sourcesSent = false;
       let accumulatedContent = "";
-      let tokenUsage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null = null;
+      let sseLineBuffer = ""; // carries a partial SSE line across network chunks
+      let tokenUsage: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+      } | null = null;
+      let upstreamError: string | null = null;
+      let clientGone = false;
+
+      const processSseLine = (rawLine: string) => {
+        const trimmed = rawLine.trim();
+        if (!trimmed || !trimmed.startsWith("data: ")) return;
+        const data = trimmed.slice(6);
+        if (data === "[DONE]") return;
+
+        try {
+          const parsed = JSON.parse(data) as {
+            choices?: { delta?: { content?: string } }[];
+            usage?: {
+              prompt_tokens?: number;
+              completion_tokens?: number;
+              total_tokens?: number;
+            } | null;
+          };
+
+          // Capture usage from final chunk (stream_options.include_usage)
+          if (parsed.usage && parsed.usage.total_tokens) {
+            tokenUsage = parsed.usage;
+          }
+
+          const content = parsed.choices?.[0]?.delta?.content;
+
+          // Send sources first
+          if (!sourcesSent && content && context && context.length > 0) {
+            const ok = send({
+              type: "sources",
+              sources: context.map((r, i) => ({
+                index: i + 1,
+                docName: r.docName,
+                chunkIndex: r.chunkIndex,
+                text: r.text,
+                page: r.page,
+                section: r.section,
+                highlightRange: r.highlightRange,
+              })),
+            });
+            if (!ok) clientGone = true;
+            sourcesSent = true;
+          }
+
+          if (content) {
+            accumulatedContent += content;
+            if (!send({ type: "content", content })) clientGone = true;
+          }
+        } catch {
+          // skip malformed JSON lines
+        }
+      };
 
       try {
         while (true) {
+          if (clientGone) {
+            await reader.cancel().catch(() => {});
+            break;
+          }
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
+          // Buffer partial lines: a data: {...} line can span multiple
+          // network chunks — splitting per-read silently drops tokens.
+          sseLineBuffer += decoder.decode(value, { stream: true });
+          const lines = sseLineBuffer.split("\n");
+          sseLineBuffer = lines.pop() || "";
 
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith("data: ")) continue;
-            const data = trimmed.slice(6);
-            if (data === "[DONE]") continue;
-
-            try {
-              const parsed = JSON.parse(data) as {
-                choices?: { delta?: { content?: string } }[];
-                usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
-              };
-
-              // Capture usage from final chunk (stream_options.include_usage)
-              if (parsed.usage && parsed.usage.total_tokens) {
-                tokenUsage = parsed.usage;
-              }
-
-              const content = parsed.choices?.[0]?.delta?.content;
-
-              // Send sources first
-              if (!sourcesSent && content && context && context.length > 0) {
-                const sourcesPayload = JSON.stringify({
-                  type: "sources",
-                  sources: context.map((r, i) => ({
-                    index: i + 1,
-                    docName: r.docName,
-                    chunkIndex: r.chunkIndex,
-                    text: r.text,
-                    page: r.page,
-                    section: r.section,
-                    highlightRange: r.highlightRange,
-                  })),
-                });
-                controller.enqueue(
-                  encoder.encode(`data: ${sourcesPayload}\n\n`)
-                );
-                sourcesSent = true;
-              }
-
-              if (content) {
-                accumulatedContent += content;
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({ type: "content", content })}\n\n`
-                  )
-                );
-              }
-            } catch {
-              // skip malformed JSON lines
-            }
+          for (const line of lines) processSseLine(line);
+          if (clientGone) {
+            await reader.cancel().catch(() => {});
+            break;
           }
         }
+        if (!clientGone && sseLineBuffer.trim()) processSseLine(sseLineBuffer);
+      } catch (err) {
+        // Upstream died mid-stream (timeout, connection reset). Tell the
+        // client instead of ending silently with a truncated answer.
+        upstreamError =
+          err instanceof Error
+            ? `Upstream stream interrupted: ${err.message}`
+            : "Upstream stream interrupted";
+      }
 
-        // After stream is complete, parse suggestions from accumulated content
-        // Try multiple regex patterns: complete tags, then partial/truncated tags
+      if (!clientGone) {
+        // Parse suggestions from accumulated content
         const suggestionPatterns = [
-          // Complete: <suggestions>["..."]</suggestions>
           /<(?:suggestions|follow_up_questions|follow-up-questions)>\s*(\[[\s\S]*?\])\s*<\/(?:suggestions|follow_up_questions|follow-up-questions)>/,
-          // Truncated closing tag: <suggestions>["..."]</uggestion (missing s)
           /<(?:suggestions|follow_up_questions|follow-up-questions)>\s*(\[[\s\S]*?\])\s*<\/[a-z_-]*/,
-          // No closing tag but has JSON array: <suggestions>["...", "..."]
           /<(?:suggestions|follow_up_questions|follow-up-questions)>\s*(\[[\s\S]*\])\s*$/,
         ];
         for (const pattern of suggestionPatterns) {
@@ -300,32 +423,22 @@ After your complete answer, suggest 2-3 relevant follow-up questions the user mi
             try {
               const suggestions = JSON.parse(match[1]);
               if (Array.isArray(suggestions) && suggestions.length > 0) {
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({ type: "suggestions", suggestions })}\n\n`
-                  )
-                );
+                send({ type: "suggestions", suggestions });
                 break;
               }
             } catch {
               // JSON truncated — try to salvage partial array
               try {
-                // Close open strings and brackets
                 let partial = match[1].trim();
-                if (!partial.endsWith(']')) {
-                  // Close any open string
+                if (!partial.endsWith("]")) {
                   const lastQuote = partial.lastIndexOf('"');
                   const lastCloseQuote = partial.lastIndexOf('"', lastQuote - 1);
                   if (lastQuote > lastCloseQuote) partial += '"';
-                  if (!partial.endsWith(']')) partial += ']';
+                  if (!partial.endsWith("]")) partial += "]";
                 }
                 const suggestions = JSON.parse(partial);
                 if (Array.isArray(suggestions) && suggestions.length > 0) {
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ type: "suggestions", suggestions })}\n\n`
-                    )
-                  );
+                  send({ type: "suggestions", suggestions });
                   break;
                 }
               } catch {
@@ -334,17 +447,16 @@ After your complete answer, suggest 2-3 relevant follow-up questions the user mi
             }
           }
         }
-      } finally {
-        // Send token usage before done
-        if (tokenUsage) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: "usage", usage: tokenUsage })}\n\n`)
-          );
-        }
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
-        );
+
+        if (tokenUsage) send({ type: "usage", usage: tokenUsage });
+        if (upstreamError) send({ type: "error", error: upstreamError });
+        send({ type: "done" });
+      }
+
+      try {
         controller.close();
+      } catch {
+        // already closed
       }
     },
   });

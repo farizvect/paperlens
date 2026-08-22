@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Send,
-  Loader2,
+  Square,
   Upload,
   CheckCircle2,
   Quote,
@@ -19,6 +19,7 @@ interface ChatInputProps {
   input: string;
   setInput: (value: string) => void;
   onSend: () => void;
+  onStop?: () => void;
   isLoading: boolean;
   activeDocName: string | null;
   uploading: boolean;
@@ -36,6 +37,7 @@ export function ChatInput({
   input,
   setInput,
   onSend,
+  onStop,
   isLoading,
   activeDocName,
   uploading,
@@ -147,16 +149,20 @@ export function ChatInput({
             rows={1}
           />
           <Button
-            onClick={onSend}
-            disabled={!input.trim() || isLoading}
+            onClick={isLoading && onStop ? onStop : onSend}
+            disabled={!isLoading && !input.trim()}
             className={cn(
-              "h-11 w-11 shrink-0 bg-[#1B365D] text-white hover:bg-[#1B365D]/90 transition-all",
+              "h-11 w-11 shrink-0 transition-all",
+              isLoading
+                ? "bg-[#8a2c2c] text-white hover:bg-[#8a2c2c]/90"
+                : "bg-[#1B365D] text-white hover:bg-[#1B365D]/90",
               input.trim() && !isLoading && "animate-send-pulse"
             )}
             size="icon"
+            title={isLoading ? "Stop generating" : "Send message"}
           >
             {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Square className="h-4 w-4" />
             ) : (
               <Send className="h-4 w-4" />
             )}

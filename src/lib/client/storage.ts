@@ -72,13 +72,10 @@ function openDB(): Promise<IDBDatabase> {
 
     req.onsuccess = () => {
       _dbInstance = req.result;
-      // Clean up on page unload
-      if (typeof window !== "undefined") {
-        window.addEventListener("beforeunload", () => {
-          _dbInstance?.close();
-          _dbInstance = null;
-        }, { once: true });
-      }
+      // NOTE: we intentionally do NOT close the DB on beforeunload.
+      // Closing it races against the async chat save that also fires on
+      // beforeunload, which can lose the last messages. Browsers close
+      // IndexedDB connections automatically on page unload anyway.
       resolve(req.result);
     };
     req.onerror = () => reject(req.error);
@@ -180,13 +177,25 @@ export async function searchChunks(
     const queryTerms = tokenize(query);
     const trigrams = buildTrigrams(query.toLowerCase());
 
+    // Candidate cap is a generous constant (not limit-scaled): ranking bias
+    // from insertion-order early-stop disappears for normal libraries, while
+    // pathological stores stay bounded.
+    const MAX_CANDIDATES = 500;
+
     const processChunk = (chunk: StoredChunk) => {
       if (docIdSet && !docIdSet.has(chunk.docId)) return;
       const textLower = chunk.text.toLowerCase();
 
-      // Match if: any query term appears OR any trigram matches (fuzzy)
+      // Match if: any query term appears (whole token) OR enough trigrams match
       const hasKeywordMatch = queryTerms.some((t) => textLower.includes(t));
-      const hasTrigramMatch = trigrams.some((tri) => textLower.includes(tri));
+      let trigramHits = 0;
+      for (const tri of trigrams) {
+        if (textLower.includes(tri)) trigramHits++;
+      }
+      // Require 2+ trigram hits (or a high ratio) so common trigrams don't
+      // flood the candidate pool with irrelevant chunks.
+      const trigramRatio = trigrams.length > 0 ? trigramHits / trigrams.length : 0;
+      const hasTrigramMatch = trigramHits >= 2 && trigramRatio >= 0.34;
 
       if (hasKeywordMatch || hasTrigramMatch) {
         chunks.push(chunk);
@@ -206,7 +215,7 @@ export async function searchChunks(
       const req = idx.openCursor(IDBKeyRange.only(singleDocId));
       req.onsuccess = () => {
         const cursor = req.result;
-        if (cursor && chunks.length < limit * 4) {
+        if (cursor && chunks.length < MAX_CANDIDATES) {
           processChunk(cursor.value);
           cursor.continue();
         } else {
@@ -218,7 +227,7 @@ export async function searchChunks(
       const req = store.openCursor();
       req.onsuccess = () => {
         const cursor = req.result;
-        if (cursor && chunks.length < limit * 6) {
+        if (cursor && chunks.length < MAX_CANDIDATES) {
           processChunk(cursor.value);
           cursor.continue();
         } else {
@@ -256,60 +265,83 @@ function buildTrigrams(text: string): string[] {
   return [...new Set(trigrams)];
 }
 
+/** Count whole-token occurrences of a term (no substring false hits like "model" in "modeling"). */
+function countTokenMatches(textLower: string, term: string): number {
+  let count = 0;
+  let idx = 0;
+  while ((idx = textLower.indexOf(term, idx)) !== -1) {
+    const before = idx === 0 ? " " : textLower[idx - 1];
+    const afterIdx = idx + term.length;
+    const after = afterIdx >= textLower.length ? " " : textLower[afterIdx];
+    // Word-boundary check: the surrounding chars must not be word chars
+    if (!/\w/.test(before) && !/\w/.test(after)) count++;
+    idx = afterIdx;
+  }
+  return count;
+}
+
+/**
+ * Core BM25 scorer shared by bm25Rank and bm25ScoreMap.
+ * Standard parameters k1=1.5, b=0.75. Phrase/heading bonuses are applied
+ * once per chunk (not compounded per term).
+ */
+function bm25Scores(chunks: StoredChunk[], query: string): Map<string, number> {
+  const terms = tokenize(query);
+  const scores = new Map<string, number>();
+  if (terms.length === 0 || chunks.length === 0) return scores;
+
+  const k1 = 1.5;
+  const b = 0.75;
+
+  const avgDl = chunks.reduce((sum, c) => sum + c.text.split(/\s+/).length, 0) / chunks.length;
+  const N = chunks.length;
+  const queryLower = query.toLowerCase();
+
+  // Build IDF for each term (whole-token matching, consistent with TF below)
+  const idf: Record<string, number> = {};
+  for (const term of terms) {
+    const docsWithTerm = chunks.filter((c) => countTokenMatches(c.text.toLowerCase(), term) > 0).length;
+    idf[term] = Math.log((N - docsWithTerm + 0.5) / (docsWithTerm + 0.5) + 1);
+  }
+
+  for (const chunk of chunks) {
+    const textLower = chunk.text.toLowerCase();
+    const dl = chunk.text.split(/\s+/).length;
+    let score = 0;
+
+    for (const term of terms) {
+      const tf = countTokenMatches(textLower, term);
+      if (tf === 0) continue;
+      const numerator = tf * (k1 + 1);
+      const denominator = tf + k1 * (1 - b + b * (dl / avgDl));
+      score += idf[term] * (numerator / denominator);
+    }
+
+    // Applied once per chunk, not per term (previously compounded to tf^n)
+    if (score > 0 && textLower.includes(queryLower)) {
+      score *= 1.5; // exact phrase match
+    }
+    if (
+      score > 0 &&
+      terms.some((t) => textLower.slice(0, 200).includes(t))
+    ) {
+      score *= 1.15; // query term in heading/summary region
+    }
+
+    scores.set(chunk.id, score);
+  }
+
+  return scores;
+}
+
 /**
  * BM25 ranking — much better than raw term frequency.
  * Uses standard BM25 parameters: k1=1.5, b=0.75
  */
 export function bm25Rank(chunks: StoredChunk[], query: string): StoredChunk[] {
-  const terms = tokenize(query);
-  if (terms.length === 0) return chunks;
-
-  const k1 = 1.5;
-  const b = 0.75;
-
-  // Compute avg document length
-  const avgDl = chunks.reduce((sum, c) => sum + c.text.split(/\s+/).length, 0) / (chunks.length || 1);
-  const N = chunks.length;
-
-  // Build IDF for each term
-  const idf: Record<string, number> = {};
-  for (const term of terms) {
-    const docsWithTerm = chunks.filter((c) => c.text.toLowerCase().includes(term)).length;
-    // BM25 IDF: log((N - n + 0.5) / (n + 0.5) + 1)
-    idf[term] = Math.log((N - docsWithTerm + 0.5) / (docsWithTerm + 0.5) + 1);
-  }
-
-  return chunks
-    .map((chunk) => {
-      const textLower = chunk.text.toLowerCase();
-      const dl = chunk.text.split(/\s+/).length;
-      let score = 0;
-
-      for (const term of terms) {
-        // Term frequency (count occurrences)
-        const tf = textLower.split(term).length - 1;
-        if (tf === 0) continue;
-
-        // BM25 formula
-        const numerator = tf * (k1 + 1);
-        const denominator = tf + k1 * (1 - b + b * (dl / avgDl));
-        score += idf[term] * (numerator / denominator);
-
-        // Bonus: exact phrase match (all terms adjacent)
-        if (textLower.includes(query.toLowerCase())) {
-          score *= 1.5;
-        }
-
-        // Bonus: term appears in first 200 chars (likely heading/summary)
-        if (textLower.slice(0, 200).includes(term)) {
-          score *= 1.15;
-        }
-      }
-
-      return { chunk, score };
-    })
-    .sort((a, b) => b.score - a.score)
-    .map((entry) => entry.chunk);
+  const scores = bm25Scores(chunks, query);
+  return [...chunks]
+    .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0));
 }
 
 // Keep legacy rankChunks as alias for backward compat
@@ -325,45 +357,7 @@ export function rankChunks(chunks: StoredChunk[], query: string): StoredChunk[] 
  * the score map so hybrid search can combine with semantic scores.
  */
 export function bm25ScoreMap(chunks: StoredChunk[], query: string): Map<string, number> {
-  const terms = tokenize(query);
-  const scores = new Map<string, number>();
-  if (terms.length === 0) return scores;
-
-  const k1 = 1.5;
-  const b = 0.75;
-  const avgDl = chunks.reduce((sum, c) => sum + c.text.split(/\s+/).length, 0) / (chunks.length || 1);
-  const N = chunks.length;
-
-  const idf: Record<string, number> = {};
-  for (const term of terms) {
-    const docsWithTerm = chunks.filter((c) => c.text.toLowerCase().includes(term)).length;
-    idf[term] = Math.log((N - docsWithTerm + 0.5) / (docsWithTerm + 0.5) + 1);
-  }
-
-  for (const chunk of chunks) {
-    const textLower = chunk.text.toLowerCase();
-    const dl = chunk.text.split(/\s+/).length;
-    let score = 0;
-
-    for (const term of terms) {
-      const tf = textLower.split(term).length - 1;
-      if (tf === 0) continue;
-      const numerator = tf * (k1 + 1);
-      const denominator = tf + k1 * (1 - b + b * (dl / avgDl));
-      score += idf[term] * (numerator / denominator);
-
-      if (textLower.includes(query.toLowerCase())) {
-        score *= 1.5;
-      }
-      if (textLower.slice(0, 200).includes(term)) {
-        score *= 1.15;
-      }
-    }
-
-    scores.set(chunk.id, score);
-  }
-
-  return scores;
+  return bm25Scores(chunks, query);
 }
 
 // ---- Embedding Storage ----

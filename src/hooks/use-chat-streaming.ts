@@ -2,10 +2,9 @@
 
 import * as React from "react";
 import { useChatStore, type ChatMessage, type TokenUsage } from "@/store/chat";
+import { useHybridSearch } from "@/hooks/use-hybrid-search";
 import {
-  searchChunks,
   getDocChunks,
-  rankChunks,
   saveChatMessages,
   loadChatMessages,
   type StoredChunk,
@@ -51,11 +50,15 @@ export function useChatStreaming({
   isNearBottomRef,
 }: UseChatStreamingParams) {
   const abortControllerRef = React.useRef<AbortController | null>(null);
+  const abortReasonRef = React.useRef<"user" | "timeout" | null>(null);
   const streamDocIdRef = React.useRef<string | null>(null);
   const streamBufferRef = React.useRef<string>("");
   const streamSourcesRef = React.useRef<string | undefined>(undefined);
   const streamUsageRef = React.useRef<TokenUsage | undefined>(undefined);
   const streamSuggestionsRef = React.useRef<string[] | undefined>(undefined);
+
+  // Hybrid search (BM25 + semantic embeddings, progressive enhancement)
+  const { search: hybridSearch } = useHybridSearch();
 
   const sendMessage = React.useCallback(async (text: string) => {
     const state = useChatStore.getState();
@@ -91,6 +94,10 @@ export function useChatStreaming({
     streamSourcesRef.current = undefined;
     streamUsageRef.current = undefined;
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    abortReasonRef.current = null;
+
     try {
       // Multi-PDF search: search across all active doc IDs
       let chunks: StoredChunk[] = [];
@@ -102,15 +109,16 @@ export function useChatStreaming({
             : [];
 
       if (docIdsToSearch.length > 0) {
-        // Search each doc and combine results
-        const searchPromises = docIdsToSearch.map((docId: string) =>
-          searchChunks(text, { docId, limit: 5 })
-        );
-        const resultsPerDoc = await Promise.all(searchPromises);
-        chunks = resultsPerDoc.flat();
-
-        // Sort by relevance and limit
-        chunks = rankChunks(chunks, text).slice(0, 8);
+        // Hybrid search: BM25 + semantic (embeddings computed lazily in background)
+        try {
+          chunks = await hybridSearch(text, {
+            docIds: docIdsToSearch,
+            limit: 8,
+          });
+        } catch (err) {
+          console.warn("Hybrid search failed, falling back to first chunks:", err);
+          chunks = [];
+        }
       }
 
       // Fallback: first chunks if no keyword matches
@@ -135,12 +143,13 @@ export function useChatStreaming({
       const history = currentMessages
         .slice(0, -2)
         .slice(-10)
-        .filter((m) => m.content)
+        .filter((m) => m.content && !m.content.includes("*Error:"))
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-      const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min
+      const timeout = setTimeout(() => {
+        abortReasonRef.current = "timeout";
+        controller.abort();
+      }, 5 * 60 * 1000); // 5 min
 
       // Include BYOK overrides if set
       const llm = useChatStore.getState().llmSettings;
@@ -164,9 +173,14 @@ export function useChatStreaming({
           }),
             signal: controller.signal,
           });
-        } catch (fetchErr) {
-          if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
-            throw new Error("Request timed out. The AI took too long to respond.");
+        } catch {
+          if (controller.signal.aborted) {
+            // Don't retry after abort — the error message is decided below
+            throw new Error(
+              abortReasonRef.current === "timeout"
+                ? "Request timed out. The AI took too long to respond."
+                : "Request aborted."
+            );
           }
           // Network error — retry
           if (retryCount < MAX_RETRIES) {
@@ -222,6 +236,10 @@ export function useChatStreaming({
           }
           readResult = await reader.read();
         } catch {
+          if (controller.signal.aborted) {
+            // User stopped — exit stream cleanly (keep partial content)
+            break;
+          }
           // Stream interrupted (tab switch, network drop)
           // If tab is hidden, wait for visibility before giving up
           if (document.hidden) {
@@ -346,14 +364,36 @@ export function useChatStreaming({
                   }
                 }
               }
+              if (parsed.type === "error" && parsed.error) {
+                // Upstream error event — surface it
+                const store = useChatStore.getState();
+                const msgs = [...store.messages];
+                if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
+                  const lastMsg = msgs[msgs.length - 1];
+                  if (lastMsg.content) {
+                    msgs[msgs.length - 1] = { ...lastMsg, content: `${lastMsg.content}\n\n*Error: ${parsed.error}*` };
+                  } else {
+                    msgs[msgs.length - 1] = { ...lastMsg, content: `*Error: ${parsed.error}*` };
+                  }
+                  useChatStore.setState({ messages: msgs });
+                }
+              }
             } catch {
-              appendToMessage(assistantMsg.id, data);
-              streamBufferRef.current += data;
+              // Skip malformed JSON lines — never render raw data in the bubble
             }
           }
         }
       }
     } catch (err) {
+      if (controller.signal.aborted && abortReasonRef.current === "user") {
+        // User pressed stop — keep partial content; drop the empty placeholder
+        const store = useChatStore.getState();
+        const msgs = store.messages.filter(
+          (m) => !(m.id === assistantMsg.id && !m.content)
+        );
+        useChatStore.setState({ messages: msgs });
+        return;
+      }
       const errorMsg = err instanceof Error ? err.message : "Something went wrong";
       const isNetworkError = errorMsg.toLowerCase().includes("network") || 
                              errorMsg.toLowerCase().includes("connection") ||
@@ -427,9 +467,12 @@ export function useChatStreaming({
       streamUsageRef.current = undefined;
       streamSuggestionsRef.current = undefined;
     }
-  }, [addMessage, appendToMessage, setLoading, activeDocIds, setSelectedSource, setSuggestions, isNearBottomRef]);
+  }, [addMessage, appendToMessage, setLoading, activeDocIds, setSelectedSource, setSuggestions, isNearBottomRef, hybridSearch]);
 
-  const isStreaming = abortControllerRef.current !== null;
+  const stop = React.useCallback(() => {
+    abortReasonRef.current = "user";
+    abortControllerRef.current?.abort();
+  }, []);
 
-  return { sendMessage, isStreaming };
+  return { sendMessage, stop };
 }

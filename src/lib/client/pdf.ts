@@ -26,11 +26,21 @@ export async function parsePDFFile(file: File): Promise<ParsedPDF> {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
     const items = textContent.items
-      .map((item) => ({ text: "str" in item ? item.str : "" }))
+      .map((item) => ({ text: "str" in item ? item.str : "", hasEOL: "hasEOL" in item && (item as { hasEOL?: boolean }).hasEOL === true }))
       .filter((item) => item.text.trim().length > 0);
-    const pageText = items.map((item) => item.text).join(" ");
+
+    // Join text items with real line breaks where pdf.js marks EOL, instead
+    // of a single space for everything. This preserves paragraph/heading
+    // structure for the chunker's section detection.
+    let pageText = "";
+    for (const item of items) {
+      pageText += item.text;
+      pageText += item.hasEOL ? "\n" : " ";
+    }
+    pageText = pageText.trimEnd();
+
     pages.push(pageText);
-    pageItems.push(items);
+    pageItems.push(items.map((item) => ({ text: item.text })));
   }
 
   return {

@@ -65,6 +65,10 @@ interface ChatState {
   hydrate: () => void;
 }
 
+// Monotonic token for async doc-switch races: if the user switches docs while
+// loadChatMessages is in flight, the stale load must not overwrite messages.
+let docLoadSeq = 0;
+
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   isLoading: false,
@@ -113,6 +117,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setActiveDoc: async (activeDocId, docName?) => {
     const state = get();
+    const seq = ++docLoadSeq;
 
     // Save previous doc's chat in background (non-blocking)
     if (state.activeDocId && state.messages.length > 0) {
@@ -158,6 +163,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
+    // A newer doc switch started while we were loading — discard stale results
+    if (seq !== docLoadSeq) return;
+
     // Update with loaded messages
     set({ messages });
 
@@ -175,6 +183,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setActiveDocIds: async (ids: string[]) => {
     const state = get();
+    const seq = ++docLoadSeq;
 
     // Save previous doc's chat in background (non-blocking)
     if (state.activeDocId && state.messages.length > 0) {
@@ -192,7 +201,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // Immediately clear messages to prevent stale content
-    const tempDocId = ids.length === 1 ? ids[0] : ids.length > 1 ? ids.sort().join(",") : null;
+    const sortedIds = [...ids].sort();
+    const tempDocId = ids.length === 1 ? ids[0] : ids.length > 1 ? sortedIds.join(",") : null;
     set({
       activeDocIds: ids,
       activeDocId: tempDocId,
@@ -219,6 +229,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         messages = [];
       }
     }
+
+    // A newer doc switch started while we were loading — discard stale results
+    if (seq !== docLoadSeq) return;
 
     const activeDocId = chatKey;
     let activeDocName: string | null;

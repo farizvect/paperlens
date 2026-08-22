@@ -10,17 +10,12 @@ import { FileText, Search, Trash2, X, Loader2, Settings, Square, CheckSquare } f
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   listDocuments,
-  saveDocument,
-  saveChunks,
-  savePdfBlob,
   deletePdfBlob,
   deleteDocument,
   searchChunks,
   type StoredDocument,
-  type StoredChunk,
 } from "@/lib/client/storage";
-import { parsePDFFile } from "@/lib/client/pdf";
-import { chunkText } from "@/lib/rag/chunker";
+import { processPdfFile } from "@/lib/client/upload";
 
 interface SearchResult {
   text: string;
@@ -136,44 +131,9 @@ export function Sidebar({ onSettingsClick }: { onSettingsClick?: () => void }) {
   async function handleUpload(file: File) {
     setUploading(true);
     try {
-      const { pages, numPages } = await parsePDFFile(file);
-
-      // Check for scanned PDF
-      const totalText = pages.join("").trim();
-      if (totalText.length < 50) {
-        throw new Error("This PDF appears to be a scanned image with no extractable text.");
-      }
-
-      const chunks = chunkText(pages);
-      const docId = Math.random().toString(36).slice(2) + Date.now().toString(36);
-
-      const doc: StoredDocument = {
-        id: docId,
-        name: file.name,
-        numPages,
-        numChunks: chunks.length,
-        createdAt: Date.now(),
-      };
-      await saveDocument(doc);
-
-      if (chunks.length > 0) {
-        const storedChunks: StoredChunk[] = chunks.map((chunk, i) => ({
-          id: `${docId}-${i}`,
-          docId,
-          docName: file.name,
-          chunkIndex: chunk.index,
-          text: chunk.text,
-          page: chunk.page,
-          section: chunk.section,
-        }));
-        await saveChunks(storedChunks);
-      }
-
-      // Save raw PDF blob for viewer
-      await savePdfBlob(docId, file);
-
+      const doc = await processPdfFile(file);
       await loadDocuments();
-      await setActiveDoc(docId, file.name);
+      await setActiveDoc(doc.id, doc.name);
     } catch (err) {
       console.error("Upload failed:", err);
     } finally {
